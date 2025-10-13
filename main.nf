@@ -20,8 +20,9 @@ def printHeader() {
     ========================================
     Input files    : ${params.input}
     Output dir     : ${params.outdir}
-    Mass accuracy  : ${params.mass_accuracy} ppm
-    Adducts        : ${params.adducts}
+    MS1 tolerance  : ${params.ms1_tol} ppm
+    MS2 tolerance  : ${params.ms2_tol} ppm
+    Timeout        : ${params.timeout_secs} seconds
     Max memory     : ${params.max_memory}
     Max CPUs       : ${params.max_cpus}
     ========================================
@@ -61,13 +62,13 @@ process ANNOTATE {
     """
     # Run MSBuddy annotation
     msbuddy \\
-        --input ${mgf_file} \\
-        --output ${mgf_file.baseName}_msbuddy.tsv \\
-        --mass_accuracy ${params.mass_accuracy} \\
-        --adducts ${params.adducts} \\
-        --mode ${params.ionization_mode} \\
-        --charge_range ${params.charge_range} \\
-        --timeout ${params.timeout}
+        -mgf ${mgf_file} \\
+        -output ${mgf_file.baseName}_msbuddy.tsv \\
+        -ms1_tol ${params.ms1_tol} \\
+        -ms2_tol ${params.ms2_tol} \\
+        -timeout_secs ${params.timeout_secs} \\
+        -parallel \\
+        -n_cpu ${task.cpus}
     """
 }
 
