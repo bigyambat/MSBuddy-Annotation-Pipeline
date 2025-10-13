@@ -39,6 +39,11 @@ RUN pip install --no-cache-dir --upgrade pip && \
 RUN pip install --no-cache-dir msbuddy || \
     echo "MSBuddy installation via pip failed. Please install manually or from source."
 
+# Create MSBuddy data directory with write permissions
+# This fixes the "Permission denied" error when MSBuddy tries to initialize its database
+RUN mkdir -p /usr/local/lib/python3.10/site-packages/msbuddy/data && \
+    chmod -R 777 /usr/local/lib/python3.10/site-packages/msbuddy/data
+
 # Alternative: Install MSBuddy from GitHub if not available on PyPI
 # Uncomment and adjust as needed:
 # RUN git clone https://github.com/Philipbear/msbuddy.git && \
