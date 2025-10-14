@@ -109,11 +109,9 @@ nextflow run main.nf \
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `--mass_accuracy` | `10` | Mass accuracy in ppm |
-| `--adducts` | `'[M+H]+,[M+Na]+,[M+K]+,[M-H]-,[M+Cl]-'` | Comma-separated list of adducts |
-| `--ionization_mode` | `'positive'` | Ionization mode (positive/negative) |
-| `--charge_range` | `'1,2'` | Charge range to consider |
-| `--timeout` | `300` | Timeout per spectrum (seconds) |
+| `--ms1_tol` | `10` | MS1 tolerance in ppm |
+| `--ms2_tol` | `10` | MS2 tolerance in ppm |
+| `--timeout_secs` | `300` | Timeout per spectrum (seconds) |
 
 #### Output Configuration
 
@@ -141,14 +139,14 @@ nextflow run main.nf --input '*.mgf' -profile docker
 
 ### Example 2: Custom Parameters
 
-Run with custom mass accuracy and specific adducts:
+Run with custom MS tolerances and timeout:
 
 ```bash
 nextflow run main.nf \
     --input 'data/*.mgf' \
-    --mass_accuracy 5 \
-    --adducts '[M+H]+,[M+Na]+' \
-    --ionization_mode positive \
+    --ms1_tol 5 \
+    --ms2_tol 15 \
+    --timeout_secs 600 \
     --outdir my_results \
     -profile docker
 ```
@@ -319,8 +317,8 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 ## Author
 
 **Bigy Ambat**
-- Version: 2.0
-- Date: October 12, 2025
+- Version: 2.1
+- Date: October 14, 2025
 
 ## Support
 
