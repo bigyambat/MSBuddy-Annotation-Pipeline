@@ -16,7 +16,7 @@ This pipeline automates the annotation and quality control reporting for mass sp
 - **Standardized Reporting**: Consistent metrics and visualizations for every sample
 - **Scalable**: Process any number of files with automatic parallelization
 - **Reproducible**: Containerized dependencies ensure consistent results
-- **Flexible Deployment**: Supports local, HPC cluster, and cloud execution
+- **Flexible Deployment**: Supports local, HPC cluster, SLURM, and cloud execution
 
 ## Pipeline Workflow
 
