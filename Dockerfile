@@ -24,21 +24,28 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 
 # Install Python dependencies
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir \
+RUN pip install --no-cache-dir --upgrade pip
+
+# Install MSBuddy first (this will install its core dependencies)
+RUN pip install --no-cache-dir msbuddy
+
+# Install additional dependencies (some may already be installed by msbuddy)
+# Install lightgbm separately to ensure it's present
+RUN pip install --no-cache-dir \
     pandas>=1.5.0 \
     matplotlib>=3.6.0 \
     seaborn>=0.12.0 \
     pyteomics>=4.5.0 \
     numpy>=1.23.0 \
     scipy>=1.9.0 \
-    lightgbm>=3.3.0
+    lightgbm>=3.3.0 \
+    scikit-learn>=1.0.0 \
+    joblib>=1.1.0
 
-# Install MSBuddy
-# Note: Adjust this based on actual MSBuddy installation method
-# If MSBuddy is available via pip:
-RUN pip install --no-cache-dir msbuddy || \
-    echo "MSBuddy installation via pip failed. Please install manually or from source."
+# Verify MSBuddy and lightgbm installation
+RUN python -c "import msbuddy; print('MSBuddy version:', msbuddy.__version__)" && \
+    python -c "import lightgbm; print('LightGBM version:', lightgbm.__version__)" && \
+    python -c "import joblib; print('Joblib version:', joblib.__version__)"
 
 # Create MSBuddy data directory with write permissions
 # This fixes the "Permission denied" error when MSBuddy tries to initialize its database
