@@ -67,7 +67,28 @@ process ANNOTATE {
 
     script:
     """
-    # Run MSBuddy annotation
+    echo "=== Starting MSBuddy annotation ==="
+    echo "Input file: ${mgf_file}"
+    echo "Output file: ${mgf_file.baseName}_msbuddy.tsv"
+    echo "MS1 tolerance: ${params.ms1_tol} ppm"
+    echo "MS2 tolerance: ${params.ms2_tol} ppm"
+    echo "Timeout: ${params.timeout_secs} seconds"
+    echo "CPUs: ${task.cpus}"
+    echo "Memory: ${task.memory}"
+    echo ""
+
+    # Check if input file exists and is readable
+    if [ ! -f "${mgf_file}" ]; then
+        echo "ERROR: Input file ${mgf_file} not found!"
+        exit 1
+    fi
+
+    echo "Input file size: \$(ls -lh ${mgf_file} | awk '{print \$5}')"
+    echo "Input file lines: \$(wc -l < ${mgf_file})"
+    echo ""
+
+    # Run MSBuddy annotation with verbose output
+    echo "Running MSBuddy..."
     msbuddy \\
         -mgf ${mgf_file} \\
         -output ${mgf_file.baseName}_msbuddy.tsv \\
@@ -76,6 +97,11 @@ process ANNOTATE {
         -timeout_secs ${params.timeout_secs} \\
         -parallel \\
         -n_cpu ${task.cpus}
+
+    echo ""
+    echo "=== MSBuddy annotation completed ==="
+    echo "Output file size: \$(ls -lh ${mgf_file.baseName}_msbuddy.tsv | awk '{print \$5}')"
+    echo "Output file lines: \$(wc -l < ${mgf_file.baseName}_msbuddy.tsv)"
     """
 }
 
