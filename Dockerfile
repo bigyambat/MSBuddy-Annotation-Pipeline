@@ -31,7 +31,8 @@ RUN pip install --no-cache-dir --upgrade pip && \
     seaborn>=0.12.0 \
     pyteomics>=4.5.0 \
     numpy>=1.23.0 \
-    scipy>=1.9.0
+    scipy>=1.9.0 \
+    lightgbm>=3.3.0
 
 # Install MSBuddy
 # Note: Adjust this based on actual MSBuddy installation method
