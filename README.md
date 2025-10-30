@@ -13,7 +13,10 @@ This pipeline automates the annotation and quality control reporting for mass sp
 ### Key Features
 
 - **Automated QC**: Eliminates manual inspection of annotation results
+- **Annotation Quality Classification**: Automatically classifies annotations as good/bad/uncertain based on multiple quality metrics
+- **Peak Explanation Analysis**: Calculates percentage of explained peaks and intensities for each annotation
 - **Standardized Reporting**: Consistent metrics and visualizations for every sample
+- **Configurable Quality Thresholds**: Customize criteria for good vs bad annotations
 - **Scalable**: Process any number of files with automatic parallelization
 - **Reproducible**: Containerized dependencies ensure consistent results
 - **Flexible Deployment**: Supports local, HPC cluster, SLURM, and cloud execution
@@ -21,16 +24,24 @@ This pipeline automates the annotation and quality control reporting for mass sp
 ## Pipeline Workflow
 
 ```
-MGF Files → MSBuddy Annotation → QC Report Generation → HTML Reports
+MGF Files → MSBuddy Annotation → Peak Explanation Analysis → QC Report Generation → HTML Reports
 ```
 
 ### Processes
 
 1. **ANNOTATE**: Runs MSBuddy on each input `.mgf` file to generate annotation results (`.tsv`)
-2. **GENERATE_QC**: Creates comprehensive HTML QC reports with:
+2. **ANALYZE_PEAK_EXPLANATION**: Analyzes MSBuddy results to:
+   - Calculate percentage of explained peaks for each spectrum
+   - Calculate percentage of explained intensity for each spectrum
+   - Classify annotations as good/bad/uncertain based on configurable thresholds
+   - Output enhanced TSV with quality metrics
+3. **GENERATE_QC**: Creates comprehensive HTML QC reports with:
    - Overall annotation rate
+   - Annotation quality classification breakdown
    - MSBuddy score distribution
    - Precursor mass error distribution (ppm)
+   - Explained peaks distribution
+   - Explained intensity distribution
    - Adduct frequency analysis
 
 ## Quick Start
@@ -113,6 +124,16 @@ nextflow run main.nf \
 | `--ms2_tol` | `10` | MS2 tolerance in ppm |
 | `--timeout_secs` | `300` | Timeout per spectrum (seconds) |
 
+#### Annotation Quality Thresholds
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--score_threshold` | `0.7` | Minimum MSBuddy score for good annotation (0-1) |
+| `--explained_peaks_pct_threshold` | `0.5` | Minimum explained peaks percentage for good annotation (0-1) |
+| `--explained_intensity_pct_threshold` | `0.6` | Minimum explained intensity percentage for good annotation (0-1) |
+| `--mass_error_threshold` | `5.0` | Maximum mass error (ppm) for good annotation |
+| `--min_explained_peaks` | `3` | Minimum number of explained peaks for good annotation |
+
 #### Output Configuration
 
 | Parameter | Default | Description |
@@ -139,7 +160,7 @@ nextflow run main.nf --input '*.mgf' -profile docker
 
 ### Example 2: Custom Parameters
 
-Run with custom MS tolerances and timeout:
+Run with custom MS tolerances and quality thresholds:
 
 ```bash
 nextflow run main.nf \
@@ -147,6 +168,9 @@ nextflow run main.nf \
     --ms1_tol 5 \
     --ms2_tol 15 \
     --timeout_secs 600 \
+    --score_threshold 0.8 \
+    --explained_peaks_pct_threshold 0.6 \
+    --mass_error_threshold 3.0 \
     --outdir my_results \
     -profile docker
 ```
@@ -179,6 +203,10 @@ results/
 │   ├── sample1_msbuddy.tsv
 │   ├── sample2_msbuddy.tsv
 │   └── ...
+├── annotations_enhanced/
+│   ├── sample1_enhanced.tsv
+│   ├── sample2_enhanced.tsv
+│   └── ...
 ├── qc_reports/
 │   ├── sample1_qc_report.html
 │   ├── sample2_qc_report.html
@@ -192,7 +220,15 @@ results/
 
 ### Output Files
 
-- **Annotations** (`annotations/`): MSBuddy annotation results in TSV format
+- **Annotations** (`annotations/`): Raw MSBuddy annotation results in TSV format
+- **Enhanced Annotations** (`annotations_enhanced/`): Annotations with added quality metrics including:
+  - `annotation_quality`: Classification (good/bad/uncertain/no_annotation)
+  - `num_explained_peaks`: Number of peaks explained by the annotation
+  - `total_peaks`: Total number of peaks in the spectrum
+  - `explained_peaks_pct`: Percentage of explained peaks
+  - `explained_intensity_pct`: Percentage of explained intensity
+  - `msbuddy_score`: MSBuddy confidence score
+  - `mass_error_ppm`: Mass error in ppm
 - **QC Reports** (`qc_reports/`): Self-contained HTML reports with visualizations
 - **Pipeline Info** (`pipeline_info/`): Execution metrics, timeline, and DAG
 
@@ -204,14 +240,24 @@ Each HTML report includes:
    - Total spectra count
    - Annotated spectra count
    - Overall annotation rate
+   - **Good quality annotations count and percentage**
+   - **Uncertain quality annotations count**
+   - **Poor quality annotations count**
    - Unique molecular formulas
    - Average annotation score
    - Average mass error
+   - **Average explained peaks percentage**
+   - **Median explained peaks percentage**
+   - **Average explained intensity percentage**
+   - **Median explained intensity percentage**
    - Unique adducts identified
 
 2. **Visualizations**
+   - **Annotation quality classification bar chart**
    - MSBuddy score distribution histogram
    - Precursor mass error distribution histogram
+   - **Explained peaks distribution histogram**
+   - **Explained intensity distribution histogram**
    - Adduct frequency bar chart
 
 ## Execution Profiles
@@ -318,7 +364,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 **Bigy Ambat**
 - Version: 2.1
-- Date: October 14, 2025
+- Date: October 30, 2025
 
 ## Support
 
@@ -327,6 +373,15 @@ For issues, questions, or contributions:
 - Contact: [your.email@example.com]
 
 ## Changelog
+
+### Version 2.1 (2025-10-30)
+- **NEW**: Peak explanation analysis with calculation of explained peaks and intensity percentages
+- **NEW**: Automatic annotation quality classification (good/bad/uncertain) based on multiple criteria
+- **NEW**: Configurable quality thresholds for annotation classification
+- **NEW**: Enhanced TSV output with quality metrics for each spectrum
+- **NEW**: Additional QC visualizations (quality classification, explained peaks, explained intensity)
+- Enhanced QC reports with comprehensive quality statistics
+- Updated documentation with new features
 
 ### Version 2.0 (2025-10-12)
 - Initial release
@@ -338,10 +393,12 @@ For issues, questions, or contributions:
 ## Future Roadmap
 
 - [ ] MultiQC module for aggregate reporting
+- [ ] GNPS library metadata integration
+- [ ] Comparison with GNPS reference annotations
 - [ ] Support for additional annotation engines
 - [ ] Support for mzML/mzXML input formats
 - [ ] Integration with metabolomics databases
-- [ ] Advanced filtering and scoring options
+- [ ] Export to SQLite database for query integration
 - [ ] Publish to nf-core
 
 ## Acknowledgments

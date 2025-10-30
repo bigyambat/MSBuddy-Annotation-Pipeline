@@ -1,11 +1,11 @@
 # MS Annotation & QC Pipeline Docker Image
-# Version: 2.0
+# Version: 2.1
 
 FROM python:3.10-slim
 
 LABEL maintainer="Bigy Ambat"
 LABEL description="Docker image for MS Annotation & QC Pipeline with MSBuddy"
-LABEL version="2.0"
+LABEL version="2.1"
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
@@ -54,7 +54,9 @@ RUN mkdir -p /usr/local/lib/python3.10/site-packages/msbuddy/data && \
 
 # Copy pipeline scripts
 COPY bin/generate_qc_report.py /usr/local/bin/
-RUN chmod +x /usr/local/bin/generate_qc_report.py
+COPY bin/analyze_peak_explanation.py /usr/local/bin/
+RUN chmod +x /usr/local/bin/generate_qc_report.py && \
+    chmod +x /usr/local/bin/analyze_peak_explanation.py
 
 # Add /usr/local/bin to PATH
 ENV PATH="/usr/local/bin:${PATH}"

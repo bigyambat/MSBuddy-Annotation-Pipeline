@@ -248,6 +248,148 @@ def plot_adduct_frequency(df):
     return fig_to_base64(fig)
 
 
+def plot_annotation_quality_distribution(df):
+    """
+    Plot distribution of annotation quality classifications (good/bad/uncertain)
+
+    Args:
+        df (pd.DataFrame): Annotation results with 'annotation_quality' column
+
+    Returns:
+        str: Base64 encoded PNG image
+    """
+    if 'annotation_quality' not in df.columns:
+        return None
+
+    plt.figure(figsize=(8, 6))
+
+    quality_counts = df['annotation_quality'].value_counts()
+
+    # Define colors for each category
+    colors = {
+        'good': '#4CAF50',
+        'uncertain': '#FFC107',
+        'bad': '#F44336',
+        'no_annotation': '#9E9E9E'
+    }
+    plot_colors = [colors.get(cat, '#9E9E9E') for cat in quality_counts.index]
+
+    bars = plt.bar(quality_counts.index, quality_counts.values, color=plot_colors, edgecolor='black', linewidth=1.2)
+
+    plt.xlabel('Annotation Quality', fontsize=12, fontweight='bold')
+    plt.ylabel('Count', fontsize=12, fontweight='bold')
+    plt.title('Annotation Quality Classification', fontsize=14, fontweight='bold', pad=15)
+
+    # Add count labels on bars
+    for bar in bars:
+        height = bar.get_height()
+        plt.text(bar.get_x() + bar.get_width()/2., height,
+                f'{int(height)}\n({height/len(df)*100:.1f}%)',
+                ha='center', va='bottom', fontsize=10, fontweight='bold')
+
+    plt.xticks(rotation=0, fontsize=11)
+    plt.tight_layout()
+
+    # Convert to base64
+    buffer = BytesIO()
+    plt.savefig(buffer, format='png', dpi=150, bbox_inches='tight')
+    buffer.seek(0)
+    image_base64 = base64.b64encode(buffer.read()).decode()
+    plt.close()
+
+    return f"data:image/png;base64,{image_base64}"
+
+
+def plot_explained_peaks_distribution(df):
+    """
+    Plot distribution of explained peaks percentage
+
+    Args:
+        df (pd.DataFrame): Annotation results with 'explained_peaks_pct' column
+
+    Returns:
+        str: Base64 encoded PNG image
+    """
+    if 'explained_peaks_pct' not in df.columns:
+        return None
+
+    # Filter out zero values for better visualization
+    data = df[df['explained_peaks_pct'] > 0]['explained_peaks_pct']
+
+    if len(data) == 0:
+        return None
+
+    plt.figure(figsize=(10, 6))
+
+    plt.hist(data, bins=30, color='#2196F3', edgecolor='black', alpha=0.7)
+
+    mean_val = data.mean()
+    median_val = data.median()
+
+    plt.axvline(mean_val, color='red', linestyle='--', linewidth=2, label=f'Mean: {mean_val:.1f}%')
+    plt.axvline(median_val, color='green', linestyle='--', linewidth=2, label=f'Median: {median_val:.1f}%')
+
+    plt.xlabel('Explained Peaks (%)', fontsize=12, fontweight='bold')
+    plt.ylabel('Frequency', fontsize=12, fontweight='bold')
+    plt.title('Distribution of Explained Peaks Percentage', fontsize=14, fontweight='bold', pad=15)
+    plt.legend(fontsize=11)
+    plt.grid(axis='y', alpha=0.3)
+    plt.tight_layout()
+
+    buffer = BytesIO()
+    plt.savefig(buffer, format='png', dpi=150, bbox_inches='tight')
+    buffer.seek(0)
+    image_base64 = base64.b64encode(buffer.read()).decode()
+    plt.close()
+
+    return f"data:image/png;base64,{image_base64}"
+
+
+def plot_explained_intensity_distribution(df):
+    """
+    Plot distribution of explained intensity percentage
+
+    Args:
+        df (pd.DataFrame): Annotation results with 'explained_intensity_pct' column
+
+    Returns:
+        str: Base64 encoded PNG image
+    """
+    if 'explained_intensity_pct' not in df.columns:
+        return None
+
+    # Filter out zero values
+    data = df[df['explained_intensity_pct'] > 0]['explained_intensity_pct']
+
+    if len(data) == 0:
+        return None
+
+    plt.figure(figsize=(10, 6))
+
+    plt.hist(data, bins=30, color='#9C27B0', edgecolor='black', alpha=0.7)
+
+    mean_val = data.mean()
+    median_val = data.median()
+
+    plt.axvline(mean_val, color='red', linestyle='--', linewidth=2, label=f'Mean: {mean_val:.1f}%')
+    plt.axvline(median_val, color='green', linestyle='--', linewidth=2, label=f'Median: {median_val:.1f}%')
+
+    plt.xlabel('Explained Intensity (%)', fontsize=12, fontweight='bold')
+    plt.ylabel('Frequency', fontsize=12, fontweight='bold')
+    plt.title('Distribution of Explained Intensity Percentage', fontsize=14, fontweight='bold', pad=15)
+    plt.legend(fontsize=11)
+    plt.grid(axis='y', alpha=0.3)
+    plt.tight_layout()
+
+    buffer = BytesIO()
+    plt.savefig(buffer, format='png', dpi=150, bbox_inches='tight')
+    buffer.seek(0)
+    image_base64 = base64.b64encode(buffer.read()).decode()
+    plt.close()
+
+    return f"data:image/png;base64,{image_base64}"
+
+
 def generate_summary_table(total_spectra, annotated_count, annotation_rate, df):
     """
     Generate HTML summary statistics table
@@ -274,6 +416,72 @@ def generate_summary_table(total_spectra, annotated_count, annotation_rate, df):
     adduct_col = 'adduct' if 'adduct' in df.columns else 'adduct_type'
     unique_adducts = df[adduct_col].nunique() if adduct_col in df.columns else 'N/A'
 
+    # Add quality classification statistics if available
+    quality_stats = ""
+    if 'annotation_quality' in df.columns:
+        quality_counts = df['annotation_quality'].value_counts()
+        good_count = quality_counts.get('good', 0)
+        bad_count = quality_counts.get('bad', 0)
+        uncertain_count = quality_counts.get('uncertain', 0)
+        good_pct = (good_count / len(df) * 100) if len(df) > 0 else 0
+
+        quality_stats = f"""
+        <tr>
+            <td><strong>Good Quality Annotations</strong></td>
+            <td><span style="color: #4CAF50; font-weight: bold;">{good_count:,} ({good_pct:.1f}%)</span></td>
+        </tr>
+        <tr>
+            <td><strong>Uncertain Quality Annotations</strong></td>
+            <td><span style="color: #FFC107; font-weight: bold;">{uncertain_count:,}</span></td>
+        </tr>
+        <tr>
+            <td><strong>Poor Quality Annotations</strong></td>
+            <td><span style="color: #F44336; font-weight: bold;">{bad_count:,}</span></td>
+        </tr>
+        """
+
+    # Add peak explanation statistics if available
+    peak_stats = ""
+    if 'explained_peaks_pct' in df.columns:
+        valid_data = df[df['explained_peaks_pct'] > 0]['explained_peaks_pct']
+        if len(valid_data) > 0:
+            avg_explained_peaks = f"{valid_data.mean():.1f}%"
+            median_explained_peaks = f"{valid_data.median():.1f}%"
+        else:
+            avg_explained_peaks = "N/A"
+            median_explained_peaks = "N/A"
+
+        peak_stats += f"""
+        <tr>
+            <td>Average Explained Peaks</td>
+            <td>{avg_explained_peaks}</td>
+        </tr>
+        <tr>
+            <td>Median Explained Peaks</td>
+            <td>{median_explained_peaks}</td>
+        </tr>
+        """
+
+    if 'explained_intensity_pct' in df.columns:
+        valid_data = df[df['explained_intensity_pct'] > 0]['explained_intensity_pct']
+        if len(valid_data) > 0:
+            avg_explained_intensity = f"{valid_data.mean():.1f}%"
+            median_explained_intensity = f"{valid_data.median():.1f}%"
+        else:
+            avg_explained_intensity = "N/A"
+            median_explained_intensity = "N/A"
+
+        peak_stats += f"""
+        <tr>
+            <td>Average Explained Intensity</td>
+            <td>{avg_explained_intensity}</td>
+        </tr>
+        <tr>
+            <td>Median Explained Intensity</td>
+            <td>{median_explained_intensity}</td>
+        </tr>
+        """
+
     html = f"""
     <table class="summary-table">
         <tr>
@@ -292,6 +500,7 @@ def generate_summary_table(total_spectra, annotated_count, annotation_rate, df):
             <td>Annotation Rate</td>
             <td><strong>{annotation_rate:.2f}%</strong></td>
         </tr>
+        {quality_stats}
         <tr>
             <td>Unique Molecular Formulas</td>
             <td>{unique_formulas}</td>
@@ -304,6 +513,7 @@ def generate_summary_table(total_spectra, annotated_count, annotation_rate, df):
             <td>Average Mass Error (ppm)</td>
             <td>{avg_mass_error}</td>
         </tr>
+        {peak_stats}
         <tr>
             <td>Unique Adducts Identified</td>
             <td>{unique_adducts}</td>
@@ -314,7 +524,8 @@ def generate_summary_table(total_spectra, annotated_count, annotation_rate, df):
 
 
 def generate_html_report(sample_name, total_spectra, annotated_count, annotation_rate,
-                        df, score_plot, mass_error_plot, adduct_plot):
+                        df, score_plot, mass_error_plot, adduct_plot, quality_plot=None,
+                        explained_peaks_plot=None, explained_intensity_plot=None):
     """
     Generate complete HTML report
 
@@ -327,6 +538,9 @@ def generate_html_report(sample_name, total_spectra, annotated_count, annotation
         score_plot (str): Base64 encoded score plot
         mass_error_plot (str): Base64 encoded mass error plot
         adduct_plot (str): Base64 encoded adduct plot
+        quality_plot (str, optional): Base64 encoded quality classification plot
+        explained_peaks_plot (str, optional): Base64 encoded explained peaks plot
+        explained_intensity_plot (str, optional): Base64 encoded explained intensity plot
 
     Returns:
         str: Complete HTML report
@@ -535,10 +749,40 @@ def generate_html_report(sample_name, total_spectra, annotated_count, annotation
                     <h3>Adduct Frequency</h3>
                     <img src="data:image/png;base64,{adduct_plot}" alt="Adduct Frequency">
                 </div>
+                """
+
+    # Add quality classification plot if available
+    if quality_plot:
+        html += f"""
+                <div class="plot">
+                    <h3>Annotation Quality Classification</h3>
+                    <img src="{quality_plot}" alt="Quality Classification">
+                </div>
+        """
+
+    # Add explained peaks plot if available
+    if explained_peaks_plot:
+        html += f"""
+                <div class="plot">
+                    <h3>Explained Peaks Distribution</h3>
+                    <img src="{explained_peaks_plot}" alt="Explained Peaks Distribution">
+                </div>
+        """
+
+    # Add explained intensity plot if available
+    if explained_intensity_plot:
+        html += f"""
+                <div class="plot">
+                    <h3>Explained Intensity Distribution</h3>
+                    <img src="{explained_intensity_plot}" alt="Explained Intensity Distribution">
+                </div>
+        """
+
+    html += """
             </div>
 
             <div class="footer">
-                <p>MS Annotation & QC Pipeline v2.0</p>
+                <p>MS Annotation & QC Pipeline v2.1</p>
                 <p>Powered by MSBuddy, Nextflow, and Python</p>
             </div>
         </div>
@@ -576,6 +820,23 @@ def main():
     mass_error_plot = plot_mass_error_distribution(df)
     adduct_plot = plot_adduct_frequency(df)
 
+    # Generate enhanced plots if columns exist
+    quality_plot = None
+    explained_peaks_plot = None
+    explained_intensity_plot = None
+
+    if 'annotation_quality' in df.columns:
+        print("Generating annotation quality visualization...")
+        quality_plot = plot_annotation_quality_distribution(df)
+
+    if 'explained_peaks_pct' in df.columns:
+        print("Generating explained peaks visualization...")
+        explained_peaks_plot = plot_explained_peaks_distribution(df)
+
+    if 'explained_intensity_pct' in df.columns:
+        print("Generating explained intensity visualization...")
+        explained_intensity_plot = plot_explained_intensity_distribution(df)
+
     # Generate HTML report
     print("Generating HTML report...")
     html_report = generate_html_report(
@@ -586,7 +847,10 @@ def main():
         df,
         score_plot,
         mass_error_plot,
-        adduct_plot
+        adduct_plot,
+        quality_plot,
+        explained_peaks_plot,
+        explained_intensity_plot
     )
 
     # Write report to file
