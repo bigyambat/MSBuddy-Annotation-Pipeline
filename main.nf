@@ -100,25 +100,42 @@ process ANNOTATE {
 
     echo ""
     echo "=== MSBuddy annotation completed ==="
+    echo "Checking MSBuddy output structure..."
+    ls -la
 
     # MSBuddy creates a directory with msbuddy_result_summary.tsv inside
     # Move the actual results file to the expected output name
-    if [ -f "${mgf_file.baseName}_msbuddy.tsv/msbuddy_result_summary.tsv" ]; then
-        echo "Found MSBuddy results in directory structure"
-        mv "${mgf_file.baseName}_msbuddy.tsv/msbuddy_result_summary.tsv" "${mgf_file.baseName}_msbuddy.tsv.tmp"
-        rm -rf "${mgf_file.baseName}_msbuddy.tsv"
-        mv "${mgf_file.baseName}_msbuddy.tsv.tmp" "${mgf_file.baseName}_msbuddy.tsv"
-        echo "Extracted results file"
+    if [ -d "${mgf_file.baseName}_msbuddy.tsv" ]; then
+        echo "MSBuddy created output directory (as expected)"
+        ls -la "${mgf_file.baseName}_msbuddy.tsv/"
+
+        if [ -f "${mgf_file.baseName}_msbuddy.tsv/msbuddy_result_summary.tsv" ]; then
+            echo "Extracting msbuddy_result_summary.tsv from directory..."
+            cp "${mgf_file.baseName}_msbuddy.tsv/msbuddy_result_summary.tsv" "${mgf_file.baseName}_msbuddy_temp.tsv"
+            rm -rf "${mgf_file.baseName}_msbuddy.tsv"
+            mv "${mgf_file.baseName}_msbuddy_temp.tsv" "${mgf_file.baseName}_msbuddy.tsv"
+            echo "Successfully extracted results file"
+        else
+            echo "ERROR: msbuddy_result_summary.tsv not found in directory"
+            ls -la "${mgf_file.baseName}_msbuddy.tsv/"
+            exit 1
+        fi
     elif [ -f "${mgf_file.baseName}_msbuddy.tsv" ]; then
         echo "MSBuddy created file directly (unexpected but OK)"
     else
         echo "ERROR: MSBuddy output not found in expected location"
-        ls -la
         exit 1
     fi
 
-    echo "Output file size: \$(ls -lh ${mgf_file.baseName}_msbuddy.tsv | awk '{print \$5}')"
-    echo "Output file lines: \$(wc -l < ${mgf_file.baseName}_msbuddy.tsv)"
+    # Verify the output file exists and is a regular file
+    if [ -f "${mgf_file.baseName}_msbuddy.tsv" ]; then
+        echo "Output file size: \$(ls -lh ${mgf_file.baseName}_msbuddy.tsv | awk '{print \$5}')"
+        echo "Output file lines: \$(wc -l < ${mgf_file.baseName}_msbuddy.tsv)"
+    else
+        echo "ERROR: Output file is not a regular file!"
+        ls -la ${mgf_file.baseName}_msbuddy.tsv*
+        exit 1
+    fi
     """
 }
 
