@@ -91,6 +91,14 @@ def load_mgf_spectra(mgf_path: str) -> Dict:
     try:
         with mgf.read(mgf_path) as reader:
             for idx, spectrum in enumerate(reader):
+                # Skip None or empty spectra
+                if spectrum is None:
+                    continue
+
+                # Skip spectra without required fields
+                if 'params' not in spectrum or 'm/z array' not in spectrum or 'intensity array' not in spectrum:
+                    continue
+
                 # Try to get spectrum ID from various possible fields
                 spec_id = spectrum.get('params', {}).get('title',
                           spectrum.get('params', {}).get('scans',
