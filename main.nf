@@ -100,6 +100,23 @@ process ANNOTATE {
 
     echo ""
     echo "=== MSBuddy annotation completed ==="
+
+    # MSBuddy creates a directory with msbuddy_result_summary.tsv inside
+    # Move the actual results file to the expected output name
+    if [ -f "${mgf_file.baseName}_msbuddy.tsv/msbuddy_result_summary.tsv" ]; then
+        echo "Found MSBuddy results in directory structure"
+        mv "${mgf_file.baseName}_msbuddy.tsv/msbuddy_result_summary.tsv" "${mgf_file.baseName}_msbuddy.tsv.tmp"
+        rm -rf "${mgf_file.baseName}_msbuddy.tsv"
+        mv "${mgf_file.baseName}_msbuddy.tsv.tmp" "${mgf_file.baseName}_msbuddy.tsv"
+        echo "Extracted results file"
+    elif [ -f "${mgf_file.baseName}_msbuddy.tsv" ]; then
+        echo "MSBuddy created file directly (unexpected but OK)"
+    else
+        echo "ERROR: MSBuddy output not found in expected location"
+        ls -la
+        exit 1
+    fi
+
     echo "Output file size: \$(ls -lh ${mgf_file.baseName}_msbuddy.tsv | awk '{print \$5}')"
     echo "Output file lines: \$(wc -l < ${mgf_file.baseName}_msbuddy.tsv)"
     """
