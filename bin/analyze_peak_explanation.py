@@ -93,7 +93,9 @@ def load_mgf_spectra(mgf_path: str) -> Dict:
     skipped_empty = 0
 
     try:
-        with mgf.read(mgf_path) as reader:
+        # Use mgf.read with use_index=False to avoid empty index issues
+        # Some MGF files don't have TITLE fields that pyteomics can index properly
+        with mgf.read(mgf_path, use_index=False) as reader:
             for idx, spectrum in enumerate(reader):
                 total_read += 1
 
