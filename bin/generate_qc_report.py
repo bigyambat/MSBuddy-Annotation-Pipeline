@@ -74,7 +74,8 @@ def count_spectra_from_mgf(mgf_file):
         print(f"DEBUG: File exists: {Path(mgf_file).exists()}", file=sys.stderr)
         print(f"DEBUG: File size: {Path(mgf_file).stat().st_size if Path(mgf_file).exists() else 'N/A'} bytes", file=sys.stderr)
 
-        with mgf.read(mgf_file) as reader:
+        # Use use_index=False to avoid empty index issues with MGF files
+        with mgf.read(mgf_file, use_index=False) as reader:
             count = sum(1 for _ in reader)
 
         print(f"DEBUG: Counted {count} spectra in MGF file", file=sys.stderr)

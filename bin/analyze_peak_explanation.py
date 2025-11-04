@@ -343,12 +343,8 @@ def calculate_peak_statistics(row: pd.Series,
             except (ValueError, AttributeError):
                 pass
 
-    if spectrum is None:
-        return stats
-
-    stats['total_peaks'] = len(spectrum['mz'])
-
     # Extract MSBuddy score (try various column names)
+    # Do this BEFORE checking if spectrum exists, as we need these for classification
     for col in ['score', 'msbuddy_score', 'confidence', 'final_score']:
         if col in row and pd.notna(row[col]):
             stats['msbuddy_score'] = float(row[col])
@@ -360,17 +356,24 @@ def calculate_peak_statistics(row: pd.Series,
             stats['mass_error_ppm'] = float(row[col])
             break
 
-    # Extract FDR (MSBuddy specific)
+    # Extract FDR (MSBuddy specific) - CRITICAL for classification
     for col in ['estimated_fdr', 'fdr', 'q_value', 'qvalue']:
         if col in row and pd.notna(row[col]):
             stats['estimated_fdr'] = float(row[col])
             break
 
-    # Extract formula (MSBuddy specific)
+    # Extract formula (MSBuddy specific) - CRITICAL for classification
     for col in ['formula_rank_1', 'formula', 'predicted_formula', 'molecular_formula']:
         if col in row and pd.notna(row[col]) and str(row[col]).strip() != '':
             stats['formula'] = str(row[col])
             break
+
+    # If spectrum not found, we can still classify based on FDR and formula
+    # But we can't calculate peak explanation statistics
+    if spectrum is None:
+        return stats
+
+    stats['total_peaks'] = len(spectrum['mz'])
 
     # Parse fragment annotations (try various column names including MSBuddy-specific ones)
     fragment_annotations = []
