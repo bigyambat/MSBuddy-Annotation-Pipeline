@@ -18,15 +18,17 @@ usage() {
     echo "Usage: $0 [OPTIONS]"
     echo ""
     echo "Options:"
-    echo "  -b, --build       Build Docker image"
-    echo "  -t, --test        Run test pipeline"
-    echo "  -c, --clean       Clean work directory and results"
-    echo "  -h, --help        Display this help message"
+    echo "  -b, --build              Build Docker image"
+    echo "  -t, --test               Run test pipeline"
+    echo "  -c, --clean              Clean work directory and results"
+    echo "  -i, --instrument <type>  Set MS instrument type (qtof, orbitrap, fticr)"
+    echo "  -h, --help               Display this help message"
     echo ""
     echo "Examples:"
-    echo "  $0 --build        # Build Docker image"
-    echo "  $0 --test         # Run test with Docker"
-    echo "  $0 --build --test # Build image and run test"
+    echo "  $0 --build               # Build Docker image"
+    echo "  $0 --test                # Run test with Docker (default: orbitrap)"
+    echo "  $0 --build --test        # Build image and run test"
+    echo "  $0 --test --instrument qtof   # Run test with QTOF instrument type"
     echo ""
 }
 
@@ -34,6 +36,7 @@ usage() {
 BUILD=false
 TEST=false
 CLEAN=false
+INSTRUMENT_TYPE=""
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -48,6 +51,10 @@ while [[ $# -gt 0 ]]; do
         -c|--clean)
             CLEAN=true
             shift
+            ;;
+        -i|--instrument)
+            INSTRUMENT_TYPE="$2"
+            shift 2
             ;;
         -h|--help)
             usage
@@ -99,12 +106,20 @@ if [[ "$TEST" == true ]]; then
     ls -1 test_data/*.mgf
     echo ""
 
+    # Build nextflow command
+    NF_CMD="nextflow run main.nf --input 'test_data/*.mgf' --outdir results -profile test,docker -resume"
+
+    # Add instrument type if specified
+    if [[ -n "$INSTRUMENT_TYPE" ]]; then
+        echo "Using instrument type: $INSTRUMENT_TYPE"
+        NF_CMD="$NF_CMD --ms_instrument_type $INSTRUMENT_TYPE"
+    else
+        echo "Using default instrument type (orbitrap)"
+    fi
+
+    echo ""
     echo "Running test pipeline with Docker..."
-    nextflow run main.nf \
-        --input 'test_data/*.mgf' \
-        --outdir results \
-        -profile test,docker \
-        -resume
+    eval $NF_CMD
 
     echo ""
     echo "✓ Test completed successfully"

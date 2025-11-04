@@ -20,9 +20,15 @@ def printHeader() {
     ========================================
     Input files    : ${params.input}
     Output dir     : ${params.outdir}
+
+    MSBuddy Settings:
+    Instrument type: ${params.ms_instrument_type}
     MS1 tolerance  : ${params.ms1_tol} ppm
     MS2 tolerance  : ${params.ms2_tol} ppm
     Timeout        : ${params.timeout_secs} seconds
+    Detailed output: ${params.msbuddy_details}
+
+    Resources:
     Max memory     : ${params.max_memory}
     Max CPUs       : ${params.max_cpus}
 
@@ -89,12 +95,16 @@ process ANNOTATE {
 
     # Run MSBuddy annotation with verbose output
     echo "Running MSBuddy..."
+    echo "Instrument type: ${params.ms_instrument_type}"
+    echo "Detailed output: ${params.msbuddy_details}"
     msbuddy \\
         -mgf ${mgf_file} \\
         -output ${mgf_file.baseName}_msbuddy.tsv \\
         -ms1_tol ${params.ms1_tol} \\
         -ms2_tol ${params.ms2_tol} \\
         -timeout_secs ${params.timeout_secs} \\
+        -ms ${params.ms_instrument_type} \\
+        -details \\
         -parallel \\
         -n_cpu ${task.cpus}
 

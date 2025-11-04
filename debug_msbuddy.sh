@@ -22,7 +22,7 @@ echo "Testing with: $TEST_MGF"
 echo ""
 
 # Test 1: Run MSBuddy directly in Docker (single-threaded, no parallel)
-echo "Test 1: Running MSBuddy in Docker (single-threaded)..."
+echo "Test 1: Running MSBuddy in Docker (single-threaded with detailed output)..."
 docker run --rm \
     -v $(pwd)/test_data:/data \
     -v $(pwd)/debug_output:/output \
@@ -33,6 +33,8 @@ docker run --rm \
         -ms1_tol 10 \
         -ms2_tol 10 \
         -timeout_secs 60 \
+        -ms orbitrap \
+        -details \
         -n_cpu 1
 
 echo ""
@@ -51,7 +53,7 @@ docker run --rm ms-annotation-qc:latest msbuddy --version || echo "Version comma
 echo ""
 
 # Test 3: Test with parallel mode
-echo "Test 3: Running MSBuddy with parallel mode..."
+echo "Test 3: Running MSBuddy with parallel mode and detailed output..."
 docker run --rm \
     -v $(pwd)/test_data:/data \
     -v $(pwd)/debug_output:/output \
@@ -62,6 +64,8 @@ docker run --rm \
         -ms1_tol 10 \
         -ms2_tol 10 \
         -timeout_secs 60 \
+        -ms orbitrap \
+        -details \
         -parallel \
         -n_cpu 2
 

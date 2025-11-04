@@ -70,11 +70,19 @@ def count_spectra_from_mgf(mgf_file):
         int: Number of spectra in the file
     """
     try:
+        print(f"DEBUG: Reading MGF file: {mgf_file}", file=sys.stderr)
+        print(f"DEBUG: File exists: {Path(mgf_file).exists()}", file=sys.stderr)
+        print(f"DEBUG: File size: {Path(mgf_file).stat().st_size if Path(mgf_file).exists() else 'N/A'} bytes", file=sys.stderr)
+
         with mgf.read(mgf_file) as reader:
             count = sum(1 for _ in reader)
+
+        print(f"DEBUG: Counted {count} spectra in MGF file", file=sys.stderr)
         return count
     except Exception as e:
         print(f"Error reading MGF file: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc()
         sys.exit(1)
 
 
@@ -90,6 +98,8 @@ def load_annotation_results(tsv_file):
     """
     try:
         df = pd.read_csv(tsv_file, sep='\t')
+        print(f"DEBUG: Loaded TSV with {len(df)} rows and {len(df.columns)} columns", file=sys.stderr)
+        print(f"DEBUG: TSV columns: {list(df.columns)}", file=sys.stderr)
         return df
     except Exception as e:
         print(f"Error reading annotation TSV file: {e}", file=sys.stderr)
@@ -139,17 +149,22 @@ def calculate_annotation_rate(total_spectra, df):
         # Count anything that's not "no_annotation"
         annotated = df[df['annotation_quality'] != 'no_annotation']
         found_col = 'annotation_quality'
+        print(f"DEBUG: Using annotation_quality column. Found {len(annotated)} annotated out of {len(df)} total", file=sys.stderr)
+        if 'annotation_quality' in df.columns:
+            quality_counts = df['annotation_quality'].value_counts()
+            print(f"DEBUG: annotation_quality breakdown: {quality_counts.to_dict()}", file=sys.stderr)
 
     # Last resort: if we found nothing, count rows, but this is likely wrong
     if found_col is None:
-        print(f"WARNING: Could not find formula or score columns. Available columns: {list(df.columns)}")
-        print(f"WARNING: Assuming all {len(df)} rows are annotated (may be incorrect)")
+        print(f"WARNING: Could not find formula or score columns. Available columns: {list(df.columns)}", file=sys.stderr)
+        print(f"WARNING: Assuming all {len(df)} rows are annotated (may be incorrect)", file=sys.stderr)
         annotated = df
 
     annotated_count = len(annotated)
     annotation_rate = (annotated_count / total_spectra * 100) if total_spectra > 0 else 0
 
-    print(f"Used column '{found_col}' to determine annotation rate")
+    print(f"DEBUG: Used column '{found_col}' to determine annotation rate", file=sys.stderr)
+    print(f"DEBUG: annotated_count={annotated_count}, total_spectra={total_spectra}, rate={annotation_rate:.2f}%", file=sys.stderr)
     return annotated_count, annotation_rate
 
 
