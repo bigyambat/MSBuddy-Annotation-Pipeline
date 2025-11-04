@@ -189,7 +189,7 @@ def fig_to_base64(fig):
 
 def plot_score_distribution(df):
     """
-    Generate histogram of MSBuddy annotation scores
+    Generate histogram of annotation quality scores or FDR
 
     Args:
         df (pd.DataFrame): Annotation results
@@ -199,15 +199,20 @@ def plot_score_distribution(df):
     """
     fig, ax = plt.subplots(figsize=(10, 6))
 
-    # Assuming MSBuddy has a 'score' column - adjust as needed
-    score_col = 'score' if 'score' in df.columns else 'msbuddy_score'
+    # Try to find score column (for non-MSBuddy tools)
+    score_cols = ['score', 'msbuddy_score', 'confidence', 'final_score']
+    score_col = next((col for col in score_cols if col in df.columns and df[col].notna().any()), None)
 
-    if score_col in df.columns:
+    # For MSBuddy, use FDR as the quality metric instead of score
+    fdr_cols = ['estimated_fdr', 'fdr', 'q_value', 'qvalue']
+    fdr_col = next((col for col in fdr_cols if col in df.columns and df[col].notna().any()), None)
+
+    if score_col:
         scores = df[score_col].dropna()
         ax.hist(scores, bins=50, edgecolor='black', alpha=0.7, color='steelblue')
-        ax.set_xlabel('MSBuddy Score', fontsize=12)
+        ax.set_xlabel('Annotation Score', fontsize=12)
         ax.set_ylabel('Frequency', fontsize=12)
-        ax.set_title('Distribution of MSBuddy Annotation Scores', fontsize=14, fontweight='bold')
+        ax.set_title('Distribution of Annotation Scores', fontsize=14, fontweight='bold')
         ax.grid(True, alpha=0.3)
 
         # Add statistics
@@ -216,8 +221,27 @@ def plot_score_distribution(df):
         ax.axvline(mean_score, color='red', linestyle='--', linewidth=2, label=f'Mean: {mean_score:.2f}')
         ax.axvline(median_score, color='green', linestyle='--', linewidth=2, label=f'Median: {median_score:.2f}')
         ax.legend()
+    elif fdr_col:
+        # Plot FDR distribution (lower is better)
+        fdr_values = df[fdr_col].dropna() * 100  # Convert to percentage
+        ax.hist(fdr_values, bins=50, edgecolor='black', alpha=0.7, color='steelblue')
+        ax.set_xlabel('False Discovery Rate (%)', fontsize=12)
+        ax.set_ylabel('Frequency', fontsize=12)
+        ax.set_title('Distribution of MSBuddy FDR (Lower is Better)', fontsize=14, fontweight='bold')
+        ax.grid(True, alpha=0.3)
+
+        # Add statistics
+        mean_fdr = fdr_values.mean()
+        median_fdr = fdr_values.median()
+        ax.axvline(mean_fdr, color='red', linestyle='--', linewidth=2, label=f'Mean: {mean_fdr:.2f}%')
+        ax.axvline(median_fdr, color='green', linestyle='--', linewidth=2, label=f'Median: {median_fdr:.2f}%')
+
+        # Add FDR thresholds
+        ax.axvline(1, color='darkgreen', linestyle=':', linewidth=1.5, alpha=0.7, label='1% FDR (high confidence)')
+        ax.axvline(5, color='orange', linestyle=':', linewidth=1.5, alpha=0.7, label='5% FDR (good)')
+        ax.legend()
     else:
-        ax.text(0.5, 0.5, 'Score data not available',
+        ax.text(0.5, 0.5, 'Score/FDR data not available',
                 ha='center', va='center', fontsize=14, transform=ax.transAxes)
 
     return fig_to_base64(fig)
@@ -244,25 +268,27 @@ def plot_mass_error_distribution(df):
             mass_error_col = col
             break
 
-    if mass_error_col:
+    if mass_error_col and df[mass_error_col].notna().any():
         mass_errors = df[mass_error_col].dropna()
-        ax.hist(mass_errors, bins=50, edgecolor='black', alpha=0.7, color='coral')
-        ax.set_xlabel('Mass Error (ppm)', fontsize=12)
-        ax.set_ylabel('Frequency', fontsize=12)
-        ax.set_title('Distribution of Precursor Mass Error', fontsize=14, fontweight='bold')
-        ax.grid(True, alpha=0.3)
+        if len(mass_errors) > 0:
+            ax.hist(mass_errors, bins=50, edgecolor='black', alpha=0.7, color='coral')
+            ax.set_xlabel('Mass Error (ppm)', fontsize=12)
+            ax.set_ylabel('Frequency', fontsize=12)
+            ax.set_title('Distribution of Precursor Mass Error', fontsize=14, fontweight='bold')
+            ax.grid(True, alpha=0.3)
 
-        # Add statistics
-        mean_error = mass_errors.mean()
-        median_error = mass_errors.median()
-        ax.axvline(mean_error, color='red', linestyle='--', linewidth=2, label=f'Mean: {mean_error:.2f} ppm')
-        ax.axvline(median_error, color='green', linestyle='--', linewidth=2, label=f'Median: {median_error:.2f} ppm')
-        ax.legend()
-    else:
-        ax.text(0.5, 0.5, 'Mass error data not available',
-                ha='center', va='center', fontsize=14, transform=ax.transAxes)
+            # Add statistics
+            mean_error = mass_errors.mean()
+            median_error = mass_errors.median()
+            ax.axvline(mean_error, color='red', linestyle='--', linewidth=2, label=f'Mean: {mean_error:.2f} ppm')
+            ax.axvline(median_error, color='green', linestyle='--', linewidth=2, label=f'Median: {median_error:.2f} ppm')
+            ax.legend()
+            plt.close(fig)
+            return fig_to_base64(fig)
 
-    return fig_to_base64(fig)
+    # No mass error data available - return None instead of empty plot
+    plt.close(fig)
+    return None
 
 
 def plot_adduct_frequency(df):
@@ -464,11 +490,25 @@ def generate_summary_table(total_spectra, annotated_count, annotation_rate, df):
     else:
         unique_formulas = 'N/A'
 
-    score_col = 'score' if 'score' in df.columns else 'msbuddy_score'
-    avg_score = f"{df[score_col].mean():.2f}" if score_col in df.columns else 'N/A'
+    # Try to find score column (for non-MSBuddy tools)
+    score_cols = ['score', 'msbuddy_score', 'confidence', 'final_score']
+    score_col = next((col for col in score_cols if col in df.columns and df[col].notna().any()), None)
+
+    # For MSBuddy, use FDR as the quality metric instead of score
+    fdr_cols = ['estimated_fdr', 'fdr', 'q_value', 'qvalue']
+    fdr_col = next((col for col in fdr_cols if col in df.columns and df[col].notna().any()), None)
+
+    if score_col:
+        avg_score = f"{df[score_col].mean():.2f}"
+    elif fdr_col:
+        # For MSBuddy FDR: lower is better, show as percentage
+        avg_fdr = df[fdr_col].mean() * 100
+        avg_score = f"{avg_fdr:.2f}% FDR"
+    else:
+        avg_score = 'N/A'
 
     mass_error_cols = ['mass_error_ppm', 'ppm_error', 'mass_error', 'delta_ppm']
-    mass_error_col = next((col for col in mass_error_cols if col in df.columns), None)
+    mass_error_col = next((col for col in mass_error_cols if col in df.columns and df[col].notna().any()), None)
     avg_mass_error = f"{df[mass_error_col].mean():.2f}" if mass_error_col else 'N/A'
 
     adduct_col = 'adduct' if 'adduct' in df.columns else 'adduct_type'
@@ -564,13 +604,21 @@ def generate_summary_table(total_spectra, annotated_count, annotation_rate, df):
             <td>{unique_formulas}</td>
         </tr>
         <tr>
-            <td>Average Score</td>
+            <td>Average Quality Metric</td>
             <td>{avg_score}</td>
         </tr>
+    """
+
+    # Add mass error row only if data is available
+    if avg_mass_error != 'N/A':
+        html += f"""
         <tr>
             <td>Average Mass Error (ppm)</td>
             <td>{avg_mass_error}</td>
         </tr>
+        """
+
+    html += f"""
         {peak_stats}
         <tr>
             <td>Unique Adducts Identified</td>
@@ -794,15 +842,21 @@ def generate_html_report(sample_name, total_spectra, annotated_count, annotation
                 <h2>Quality Control Visualizations</h2>
 
                 <div class="plot">
-                    <h3>MSBuddy Score Distribution</h3>
+                    <h3>Quality Score/FDR Distribution</h3>
                     <img src="data:image/png;base64,{score_plot}" alt="Score Distribution">
                 </div>
+                """
 
+    # Add mass error plot only if data is available
+    if mass_error_plot:
+        html += f"""
                 <div class="plot">
                     <h3>Precursor Mass Error Distribution</h3>
                     <img src="data:image/png;base64,{mass_error_plot}" alt="Mass Error Distribution">
                 </div>
+        """
 
+    html += f"""
                 <div class="plot">
                     <h3>Adduct Frequency</h3>
                     <img src="data:image/png;base64,{adduct_plot}" alt="Adduct Frequency">
