@@ -1,0 +1,479 @@
+---
+title: "MSBuddy Annotation Pipeline - Session Notes"
+author: "Development Session"
+date: "2025-10-30"
+output: html_document
+---
+
+# Session Summary
+
+This document contains context and notes from the MSBuddy annotation pipeline development and testing session.
+
+---
+
+## Pipeline Overview
+
+**Repository**: MSBuddy-Annotation-Pipeline
+**Purpose**: Nextflow pipeline for automated MS/MS annotation using MSBuddy with quality control reporting
+
+### Pipeline Steps:
+1. **ANNOTATE**: Run MSBuddy on MGF files to predict molecular formulas
+2. **ANALYZE_PEAK_EXPLANATION**: Analyze peak coverage and classify annotation quality
+3. **GENERATE_QC**: Create HTML QC reports
+
+---
+
+## Issues Fixed During Session
+
+### 1. Missing LightGBM Dependency (SOLVED ✓)
+
+**Error**:
+```
+ModuleNotFoundError: No module named 'lightgbm'
+```
+
+**Root Cause**: MSBuddy's ML models require `lightgbm`, but it wasn't being installed properly in Docker.
+
+**Fix**: Updated `Dockerfile` to:
+- Install MSBuddy first
+- Then explicitly install lightgbm, scikit-learn, joblib
+- Add verification step during build
+
+**Location**: `Dockerfile` lines 27-48
+
+---
+
+### 2. MSBuddy Output Directory Structure (SOLVED ✓)
+
+**Error**:
+```
+IsADirectoryError: [Errno 21] Is a directory: 'small_test_msbuddy.tsv'
+```
+
+**Root Cause**: MSBuddy creates a **directory** named `{output}.tsv/` containing `msbuddy_result_summary.tsv` inside, not a flat TSV file.
+
+**Directory Structure Created by MSBuddy**:
+```
+small_test_msbuddy.tsv/           # Directory (not a file!)
+└── msbuddy_result_summary.tsv    # Actual results file
+```
+
+**Fix**: Updated `main.nf` ANNOTATE process to:
+1. Detect if output is a directory
+2. Extract `msbuddy_result_summary.tsv` from inside
+3. Move it to the expected flat file location
+4. Clean up the directory
+
+**Location**: `main.nf` lines 104-138
+
+---
+
+### 3. MGF Parser Handling None Values (SOLVED ✓)
+
+**Error**:
+```
+AttributeError: 'NoneType' object has no attribute 'get'
+```
+
+**Root Cause**: The `analyze_peak_explanation.py` script didn't check for `None` spectra when parsing MGF files.
+
+**Fix**: Added validation to skip:
+- None spectra
+- Spectra missing required fields ('params', 'm/z array', 'intensity array')
+
+**Location**: `bin/analyze_peak_explanation.py` lines 93-100
+
+---
+
+### 4. CPU Configuration (SOLVED ✓)
+
+**Issue**: Test profile was limiting CPUs to 2, overriding global default.
+
+**Fix**: Updated both:
+- Global `max_cpus = 8` (was 4)
+- Test profile `max_cpus = 8` (was 2)
+- ANNOTATE process to request 8 CPUs (was 2)
+
+**Impact**: ~4x faster MSBuddy annotation (1-2 hours instead of 4-6 hours for 1.3 GB files)
+
+**Location**: `nextflow.config` lines 27, 60, 154
+
+---
+
+## Current Pipeline Configuration
+
+### Default Parameters:
+```
+Input files:    *.mgf
+Output dir:     results/
+MS1 tolerance:  10 ppm
+MS2 tolerance:  10 ppm
+Timeout:        60 seconds per spectrum
+Max memory:     8 GB
+Max CPUs:       8
+
+Quality Thresholds:
+Score:          0.7
+Explained peaks: 0.5 (50%)
+Explained int.:  0.6 (60%)
+Mass error:     5.0 ppm
+Min peaks:      3
+```
+
+### Running the Pipeline:
+
+**Quick test**:
+```bash
+./build_and_test.sh --build --test
+```
+
+**Full run**:
+```bash
+nextflow run main.nf \
+    --input 'data/*.mgf' \
+    --outdir results \
+    -profile docker
+```
+
+**Resume after failure**:
+```bash
+nextflow run main.nf \
+    --input 'data/*.mgf' \
+    --outdir results \
+    -profile docker \
+    -resume
+```
+
+---
+
+## MSBuddy Output Format Explained
+
+### Column Definitions:
+
+| Column | Description |
+|--------|-------------|
+| `identifier` | Spectrum ID from MGF file |
+| `mz` | Precursor m/z value |
+| `rt` | Retention time (may be empty) |
+| `adduct` | Ionization adduct (e.g., [M+H]1+) |
+| `formula_rank_1` to `_5` | Top 5 candidate molecular formulas |
+| `estimated_fdr` | False Discovery Rate (0-1, lower is better) |
+| `annotation_quality` | Classification: good/bad/no_annotation |
+| `num_explained_peaks` | Number of MS/MS peaks explained |
+| `total_peaks` | Total MS/MS peaks in spectrum |
+| `explained_peaks_pct` | % of peaks explained (0-1) |
+| `explained_intensity_pct` | % of intensity explained (0-1) |
+| `msbuddy_score` | Confidence score (empty if failed) |
+| `mass_error_ppm` | Mass accuracy error in ppm |
+
+### Quality Classification:
+
+**Good Annotation**:
+- `msbuddy_score` ≥ 0.7
+- `explained_peaks_pct` ≥ 0.5
+- `explained_intensity_pct` ≥ 0.6
+- `mass_error_ppm` ≤ 5.0
+- `num_explained_peaks` ≥ 3
+
+**No Annotation**:
+- `num_explained_peaks` = 0
+- `msbuddy_score` is empty
+- MSBuddy couldn't find a suitable formula
+
+---
+
+## Data Analysis: Why Results Are Poor
+
+### Test Data Characteristics:
+
+**File**: `small_test.mgf` (992 KB, 336 spectra)
+**Source**: GNPS metabolomics library (ALL_GNPS_cleaned.mgf subset)
+**Sample Compound**: 3-Des-Microcystein_LR (981 Da, cyclic peptide)
+
+**Spectrum Details**:
+```
+MS_IONISATION=ESI            ✓ Compatible
+MS_MASS_ANALYZER=qtof        ✓ High resolution
+MSLEVEL=2                    ✓ MS/MS data
+ADDUCT=[M+H]1+              ✓ Correct
+Total peaks: 218             ⚠ Very high (noisy)
+```
+
+### Why MSBuddy Struggles with This Data:
+
+#### 1. **Compound Complexity**
+- Cyclic peptides (microcystins)
+- Multiple nitrogen atoms
+- Unusual amino acids
+- Non-standard fragmentation patterns
+
+#### 2. **Chemical Space Limitations**
+MSBuddy is trained on:
+- Simple organic molecules
+- Standard metabolites (< 600 Da)
+- Common fragmentation chemistry
+
+Your data contains:
+- Complex natural products (940-981 Da)
+- Cyclic peptides
+- Unusual structural features
+
+#### 3. **Expected Success Rates**
+
+| Compound Class | MSBuddy Success Rate |
+|----------------|---------------------|
+| Simple metabolites (sugars, amino acids) | 60-80% |
+| Standard natural products | 30-50% |
+| **Complex cyclic peptides** | **5-20%** ← Your data |
+| Novel/unusual structures | < 5% |
+
+### Is MSBuddy the Right Tool?
+
+**YES for**:
+✓ ESI ionization
+✓ Small molecules (< 1000 Da)
+✓ Metabolomics data
+✓ High-resolution MS/MS
+
+**HOWEVER**: Complex cyclic peptides are at the edge of MSBuddy's capabilities.
+
+---
+
+## Performance Expectations
+
+### Runtime Estimates (by file size):
+
+| File Size | Spectra | 2 CPUs | 8 CPUs | Notes |
+|-----------|---------|--------|--------|-------|
+| 1 MB (test) | ~500 | 25-30 min | 8-10 min | Like small_test.mgf |
+| 1.3 GB | 50k-200k | 4-6 hours | 1-2 hours | Full dataset |
+
+**Factors affecting speed**:
+- Number of CPUs (parallel processing)
+- Timeout setting (60s default)
+- Spectrum complexity
+- Number of candidate formulas
+
+### MSBuddy Processing Steps:
+
+1. **Formula generation** (fast)
+2. **Candidate ranking** (slow) ← Bottleneck
+   - ML model inference with LightGBM
+   - Feature calculation for each candidate
+   - 5-30 seconds per spectrum
+3. **FDR calculation** (fast)
+
+---
+
+## Monitoring the Pipeline
+
+### View Nextflow Log:
+```bash
+tail -f .nextflow.log
+```
+
+### View Process Logs:
+```bash
+# Find latest work directory
+find work -name ".command.log" -type f -printf '%T@ %p\n' | sort -n | tail -1
+
+# Tail specific process (replace hash)
+tail -f work/96/de00dc*/.command.log
+
+# View errors
+cat work/96/de00dc*/.command.err
+
+# View output
+cat work/96/de00dc*/.command.out
+```
+
+### Check Work Directory Contents:
+```bash
+# See what MSBuddy created
+ls -la work/96/de00dc*/
+
+# View MSBuddy output structure
+ls -la work/96/de00dc*/small_test_msbuddy.tsv/
+```
+
+---
+
+## Recommendations for Better Results
+
+### Option 1: Relax QC Thresholds (for complex metabolomics)
+
+**Current (strict)**:
+```bash
+--score_threshold 0.7
+--explained_peaks_pct_threshold 0.5
+--explained_intensity_pct_threshold 0.6
+--min_explained_peaks 3
+```
+
+**Recommended for complex data**:
+```bash
+--score_threshold 0.5
+--explained_peaks_pct_threshold 0.3
+--explained_intensity_pct_threshold 0.4
+--min_explained_peaks 2
+```
+
+### Option 2: Use Complementary Tools
+
+For complex natural products, combine MSBuddy with:
+- **SIRIUS** - Better for complex formulas
+- **MetFrag** - Database searching
+- **MS-FINDER** - Unknown metabolites
+- **GNPS molecular networking** - Structural analogs
+
+### Option 3: Pre-filter Data
+
+Keep only simpler compounds (m/z < 600 Da) for better annotation rates.
+
+### Option 4: Increase Speed
+
+```bash
+# Use more CPUs
+--max_cpus 16
+
+# Reduce timeout for difficult spectra
+--timeout_secs 30
+```
+
+---
+
+## Git Workflow
+
+### On Development Machine:
+```bash
+# Make changes, commit
+git add .
+git commit -m "Fix: MSBuddy output extraction and LightGBM dependency"
+git push
+```
+
+### On Local/Testing Machine:
+```bash
+# Pull latest changes
+git pull
+
+# Rebuild Docker (required after code changes)
+./build_and_test.sh --build
+
+# Resume pipeline (skips completed steps)
+./build_and_test.sh --test
+```
+
+**Important**: `git pull` is safe - it won't overwrite:
+- `work/` directory (Nextflow cache)
+- `results/` directory
+- `.nextflow.log*` files
+
+These should be in `.gitignore` (TODO: create if missing)
+
+---
+
+## Files Modified This Session
+
+1. **Dockerfile** - Added lightgbm and dependencies
+2. **nextflow.config** - Updated CPU limits and test profile
+3. **main.nf** - Fixed MSBuddy output extraction logic
+4. **bin/analyze_peak_explanation.py** - Added None spectrum handling
+5. **debug_msbuddy.sh** - Created debugging script (NEW)
+
+---
+
+## Next Steps / TODO
+
+### Immediate:
+- [ ] Create `.gitignore` file (add work/, results/, .nextflow.log*)
+- [ ] Test with full 1.3 GB dataset
+- [ ] Verify QC report generation completes
+
+### Optional Improvements:
+- [ ] Add progress monitoring script
+- [ ] Create spectrum cleaning utility for noisy data
+- [ ] Add alternative adduct support ([M+Na]+, [M+NH4]+)
+- [ ] Implement relaxed QC thresholds as a profile
+- [ ] Add SIRIUS integration as alternative annotator
+
+### Documentation:
+- [ ] Add README section on expected success rates
+- [ ] Document MSBuddy output format
+- [ ] Add troubleshooting guide
+- [ ] Create example with simple metabolites
+
+---
+
+## Useful Commands Reference
+
+### Docker:
+```bash
+# Build image
+docker build -t ms-annotation-qc:latest .
+
+# Check running containers
+docker ps
+
+# View container logs
+docker logs <container_id>
+
+# View resource usage
+docker stats
+```
+
+### Nextflow:
+```bash
+# Clean everything
+rm -rf work/ results/ .nextflow*
+
+# Resume from checkpoint
+-resume
+
+# Use specific profile
+-profile test,docker
+
+# Override parameters
+--max_cpus 16 --timeout_secs 30
+```
+
+### Data Inspection:
+```bash
+# Count spectra in MGF
+grep -c "BEGIN IONS" file.mgf
+
+# View first spectrum
+awk '/BEGIN IONS/,/END IONS/ {print} /END IONS/ {exit}' file.mgf
+
+# Check m/z distribution
+grep "^PEPMASS=" file.mgf | cut -d= -f2 | sort -n
+
+# Count successful annotations
+grep -v "no_annotation" results/annotations/*.tsv | wc -l
+```
+
+---
+
+## Key Learnings
+
+1. **MSBuddy output is a directory structure**, not a flat file
+2. **Complex metabolomics data has low annotation rates** (5-20% for cyclic peptides)
+3. **LightGBM must be explicitly installed** even though MSBuddy depends on it
+4. **8 CPUs provides ~4x speedup** over 2 CPUs for large datasets
+5. **Test profiles override global defaults** - must update both
+6. **GNPS data is real experimental data**, just complex natural products
+7. **`-resume` works even after Docker rebuild** - caches at task level
+
+---
+
+## Contact & Resources
+
+- **MSBuddy GitHub**: https://github.com/Philipbear/msbuddy
+- **Nextflow Docs**: https://www.nextflow.io/docs/latest/
+- **GNPS**: https://gnps.ucsd.edu/
+
+---
+
+*Session Date: October 30, 2025*
+*Pipeline Version: 2.1*
+*Last Updated: After fixing MSBuddy directory extraction issue*

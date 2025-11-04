@@ -108,8 +108,15 @@ def calculate_annotation_rate(total_spectra, df):
         tuple: (annotated_count, annotation_rate)
     """
     # Count non-null annotations (assuming annotations have formula or structure info)
-    # Adjust this logic based on actual MSBuddy output format
-    annotated = df.dropna(subset=['formula'] if 'formula' in df.columns else df.columns[:1])
+    # MSBuddy outputs formula_rank_1, formula_rank_2, etc.
+    if 'formula_rank_1' in df.columns:
+        annotated = df.dropna(subset=['formula_rank_1'])
+    elif 'formula' in df.columns:
+        annotated = df.dropna(subset=['formula'])
+    else:
+        # Fallback: assume all rows are annotated
+        annotated = df
+
     annotated_count = len(annotated)
     annotation_rate = (annotated_count / total_spectra * 100) if total_spectra > 0 else 0
 
@@ -404,7 +411,12 @@ def generate_summary_table(total_spectra, annotated_count, annotation_rate, df):
         str: HTML table string
     """
     # Calculate additional statistics
-    unique_formulas = df['formula'].nunique() if 'formula' in df.columns else 'N/A'
+    if 'formula_rank_1' in df.columns:
+        unique_formulas = df['formula_rank_1'].nunique()
+    elif 'formula' in df.columns:
+        unique_formulas = df['formula'].nunique()
+    else:
+        unique_formulas = 'N/A'
 
     score_col = 'score' if 'score' in df.columns else 'msbuddy_score'
     avg_score = f"{df[score_col].mean():.2f}" if score_col in df.columns else 'N/A'
