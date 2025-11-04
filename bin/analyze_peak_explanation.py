@@ -95,8 +95,12 @@ def load_mgf_spectra(mgf_path: str) -> Dict:
                 if spectrum is None:
                     continue
 
-                # Skip spectra without required fields
-                if 'params' not in spectrum or 'm/z array' not in spectrum or 'intensity array' not in spectrum:
+                # Skip spectra without m/z and intensity arrays
+                if 'm/z array' not in spectrum or 'intensity array' not in spectrum:
+                    continue
+
+                # Skip spectra with empty arrays
+                if len(spectrum['m/z array']) == 0 or len(spectrum['intensity array']) == 0:
                     continue
 
                 # Try to get spectrum ID from various possible fields
