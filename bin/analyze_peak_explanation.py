@@ -262,17 +262,40 @@ def calculate_peak_statistics(row: pd.Series,
         'mass_error_ppm': None,
     }
 
-    # Get spectrum ID (try various column names)
+    # Get spectrum ID (try various column names including MSBuddy-specific ones)
     spec_id = None
-    for col in ['spectrum_id', 'title', 'scans', 'id', 'identifier', 'spectrum_title']:
+    for col in ['spectrum_id', 'query_spectrum_idx', 'spectrum_index', 'idx', 'title', 'scans', 'id', 'identifier', 'spectrum_title', 'scan', 'index']:
         if col in row and pd.notna(row[col]):
-            spec_id = row[col]
+            spec_id = str(row[col])  # Convert to string for consistency
             break
 
-    if spec_id is None or spec_id not in spectra_dict:
+    # If still no spec_id, try using row index
+    if spec_id is None:
+        spec_id = f'spectrum_{row.name}'
+
+    # Try to find spectrum in dict with various possible keys
+    spectrum = None
+    if spec_id in spectra_dict:
+        spectrum = spectra_dict[spec_id]
+    else:
+        # Try without "spectrum_" prefix
+        alt_id = spec_id.replace('spectrum_', '')
+        if alt_id in spectra_dict:
+            spectrum = spectra_dict[alt_id]
+        else:
+            # Try as integer index
+            try:
+                int_id = int(spec_id.split('_')[-1])
+                if f'spectrum_{int_id}' in spectra_dict:
+                    spectrum = spectra_dict[f'spectrum_{int_id}']
+                elif str(int_id) in spectra_dict:
+                    spectrum = spectra_dict[str(int_id)]
+            except (ValueError, AttributeError):
+                pass
+
+    if spectrum is None:
         return stats
 
-    spectrum = spectra_dict[spec_id]
     stats['total_peaks'] = len(spectrum['mz'])
 
     # Extract MSBuddy score (try various column names)
@@ -287,13 +310,28 @@ def calculate_peak_statistics(row: pd.Series,
             stats['mass_error_ppm'] = float(row[col])
             break
 
-    # Parse fragment annotations (try various column names)
+    # Parse fragment annotations (try various column names including MSBuddy-specific ones)
     fragment_annotations = []
-    for col in ['fragments', 'fragment_annotations', 'explained_peaks', 'matched_fragments']:
+    for col in ['fragments', 'fragment_annotations', 'explained_peaks', 'matched_fragments',
+                'msms_explained', 'explanation', 'ms2_explanation', 'matched_peaks',
+                'fragment_mz', 'annotated_peaks']:
         if col in row and pd.notna(row[col]):
             fragment_annotations = parse_fragment_annotations(row[col])
             if fragment_annotations:
                 break
+
+    # If no fragments found, check if MSBuddy has separate columns for each fragment
+    # MSBuddy may output individual fragment columns like frag_1_mz, frag_2_mz, etc.
+    if not fragment_annotations:
+        frag_cols = [c for c in row.index if 'frag' in str(c).lower() and 'mz' in str(c).lower()]
+        if frag_cols:
+            for frag_col in frag_cols:
+                if pd.notna(row[frag_col]):
+                    try:
+                        mz = float(row[frag_col])
+                        fragment_annotations.append({'mz': mz, 'formula': 'unknown'})
+                    except (ValueError, TypeError):
+                        continue
 
     # Calculate peak matching statistics
     if fragment_annotations:
@@ -384,6 +422,11 @@ def main():
     print(f"Loading MSBuddy annotations from: {args.msbuddy_tsv}")
     annotations_df = load_msbuddy_annotations(args.msbuddy_tsv)
     print(f"Loaded {len(annotations_df)} annotations")
+    print(f"\nMSBuddy TSV columns: {list(annotations_df.columns)}")
+    print(f"First row sample (first 5 columns):")
+    if len(annotations_df) > 0:
+        for col in list(annotations_df.columns)[:10]:
+            print(f"  {col}: {annotations_df.iloc[0][col]}")
 
     # Prepare thresholds dictionary
     thresholds = {

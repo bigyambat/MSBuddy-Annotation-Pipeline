@@ -108,18 +108,48 @@ def calculate_annotation_rate(total_spectra, df):
         tuple: (annotated_count, annotation_rate)
     """
     # Count non-null annotations (assuming annotations have formula or structure info)
-    # MSBuddy outputs formula_rank_1, formula_rank_2, etc.
-    if 'formula_rank_1' in df.columns:
-        annotated = df.dropna(subset=['formula_rank_1'])
-    elif 'formula' in df.columns:
-        annotated = df.dropna(subset=['formula'])
-    else:
-        # Fallback: assume all rows are annotated
+    # Try multiple possible column names that MSBuddy might use
+    possible_formula_cols = [
+        'formula_rank_1', 'formula', 'molecular_formula', 'mf',
+        'predicted_formula', 'top_formula', 'formula_1'
+    ]
+
+    annotated = df
+    found_col = None
+
+    for col in possible_formula_cols:
+        if col in df.columns:
+            # Count rows where the column has a non-empty, non-null value
+            annotated = df[df[col].notna() & (df[col] != '') & (df[col] != 'None')]
+            found_col = col
+            break
+
+    # If no formula column found, check for other indicators of successful annotation
+    if found_col is None:
+        # Check for score column - if present and > 0, likely annotated
+        score_cols = ['score', 'msbuddy_score', 'confidence', 'final_score']
+        for col in score_cols:
+            if col in df.columns:
+                annotated = df[df[col].notna() & (df[col] > 0)]
+                found_col = col
+                break
+
+    # If still no indicator found, check if annotation_quality column exists (added by analyze_peak_explanation.py)
+    if found_col is None and 'annotation_quality' in df.columns:
+        # Count anything that's not "no_annotation"
+        annotated = df[df['annotation_quality'] != 'no_annotation']
+        found_col = 'annotation_quality'
+
+    # Last resort: if we found nothing, count rows, but this is likely wrong
+    if found_col is None:
+        print(f"WARNING: Could not find formula or score columns. Available columns: {list(df.columns)}")
+        print(f"WARNING: Assuming all {len(df)} rows are annotated (may be incorrect)")
         annotated = df
 
     annotated_count = len(annotated)
     annotation_rate = (annotated_count / total_spectra * 100) if total_spectra > 0 else 0
 
+    print(f"Used column '{found_col}' to determine annotation rate")
     return annotated_count, annotation_rate
 
 
