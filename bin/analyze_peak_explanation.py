@@ -87,25 +87,45 @@ def load_mgf_spectra(mgf_path: str) -> Dict:
         Dictionary mapping spectrum ID to spectrum data
     """
     spectra_dict = {}
+    total_read = 0
+    skipped_none = 0
+    skipped_no_arrays = 0
+    skipped_empty = 0
 
     try:
         with mgf.read(mgf_path) as reader:
             for idx, spectrum in enumerate(reader):
+                total_read += 1
+
+                # Debug first 2 spectra
+                if idx < 2:
+                    print(f"DEBUG: Spectrum {idx} type: {type(spectrum)}", file=sys.stderr)
+                    print(f"DEBUG: Spectrum {idx} keys: {list(spectrum.keys()) if spectrum else 'None'}", file=sys.stderr)
+
                 # Skip None or empty spectra
                 if spectrum is None:
+                    skipped_none += 1
                     continue
 
                 # Skip spectra without m/z and intensity arrays
                 if 'm/z array' not in spectrum or 'intensity array' not in spectrum:
+                    skipped_no_arrays += 1
+                    if idx < 2:
+                        print(f"DEBUG: Spectrum {idx} missing arrays. Has keys: {list(spectrum.keys())}", file=sys.stderr)
                     continue
 
                 # Skip spectra with empty arrays
                 if len(spectrum['m/z array']) == 0 or len(spectrum['intensity array']) == 0:
+                    skipped_empty += 1
                     continue
 
                 # Try to get spectrum ID from various possible fields
                 # Priority: spectrumid (GNPS format) > title > scans > index
                 params = spectrum.get('params', {})
+
+                if idx < 2:
+                    print(f"DEBUG: Spectrum {idx} params: {params}", file=sys.stderr)
+
                 spec_id = None
 
                 # Try SPECTRUMID first (GNPS format)
@@ -122,6 +142,9 @@ def load_mgf_spectra(mgf_path: str) -> Dict:
                 else:
                     spec_id = f'spectrum_{idx}'
 
+                if idx < 2:
+                    print(f"DEBUG: Spectrum {idx} assigned ID: {spec_id}", file=sys.stderr)
+
                 spectra_dict[spec_id] = {
                     'mz': spectrum['m/z array'],
                     'intensity': spectrum['intensity array'],
@@ -131,7 +154,16 @@ def load_mgf_spectra(mgf_path: str) -> Dict:
 
     except Exception as e:
         print(f"Error loading MGF file: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc()
         raise
+
+    print(f"DEBUG: MGF loading summary:", file=sys.stderr)
+    print(f"  Total spectra read: {total_read}", file=sys.stderr)
+    print(f"  Skipped (None): {skipped_none}", file=sys.stderr)
+    print(f"  Skipped (no arrays): {skipped_no_arrays}", file=sys.stderr)
+    print(f"  Skipped (empty): {skipped_empty}", file=sys.stderr)
+    print(f"  Successfully loaded: {len(spectra_dict)}", file=sys.stderr)
 
     return spectra_dict
 
