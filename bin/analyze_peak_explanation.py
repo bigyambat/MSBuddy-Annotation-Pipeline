@@ -100,19 +100,29 @@ def load_mgf_spectra(mgf_path: str) -> Dict:
                     continue
 
                 # Try to get spectrum ID from various possible fields
-                spec_id = spectrum.get('params', {}).get('title',
-                          spectrum.get('params', {}).get('scans',
-                          spectrum.get('params', {}).get('spectrum_id', f'spectrum_{idx}')))
+                # Priority: spectrumid (GNPS format) > title > scans > index
+                params = spectrum.get('params', {})
+                spec_id = None
 
-                # Handle case where title might be directly in spectrum dict
-                if spec_id == f'spectrum_{idx}' and 'title' in spectrum:
+                # Try SPECTRUMID first (GNPS format)
+                if 'spectrumid' in params:
+                    spec_id = params['spectrumid']
+                elif 'spectrum_id' in params:
+                    spec_id = params['spectrum_id']
+                elif 'title' in params:
+                    spec_id = params['title']
+                elif 'title' in spectrum:
                     spec_id = spectrum['title']
+                elif 'scans' in params:
+                    spec_id = str(params['scans'])
+                else:
+                    spec_id = f'spectrum_{idx}'
 
                 spectra_dict[spec_id] = {
                     'mz': spectrum['m/z array'],
                     'intensity': spectrum['intensity array'],
-                    'precursor_mz': spectrum['params'].get('pepmass', [0])[0] if isinstance(spectrum['params'].get('pepmass'), list) else spectrum['params'].get('pepmass', 0),
-                    'charge': spectrum['params'].get('charge', [1])[0] if isinstance(spectrum['params'].get('charge'), list) else spectrum['params'].get('charge', 1),
+                    'precursor_mz': params.get('pepmass', [0])[0] if isinstance(params.get('pepmass'), list) else params.get('pepmass', 0),
+                    'charge': params.get('charge', [1])[0] if isinstance(params.get('charge'), list) else params.get('charge', 1),
                 }
 
     except Exception as e:
@@ -260,6 +270,8 @@ def calculate_peak_statistics(row: pd.Series,
         'explained_intensity_pct': 0.0,
         'msbuddy_score': None,
         'mass_error_ppm': None,
+        'estimated_fdr': None,
+        'formula': None,
     }
 
     # Get spectrum ID (try various column names including MSBuddy-specific ones)
@@ -310,6 +322,18 @@ def calculate_peak_statistics(row: pd.Series,
             stats['mass_error_ppm'] = float(row[col])
             break
 
+    # Extract FDR (MSBuddy specific)
+    for col in ['estimated_fdr', 'fdr', 'q_value', 'qvalue']:
+        if col in row and pd.notna(row[col]):
+            stats['estimated_fdr'] = float(row[col])
+            break
+
+    # Extract formula (MSBuddy specific)
+    for col in ['formula_rank_1', 'formula', 'predicted_formula', 'molecular_formula']:
+        if col in row and pd.notna(row[col]) and str(row[col]).strip() != '':
+            stats['formula'] = str(row[col])
+            break
+
     # Parse fragment annotations (try various column names including MSBuddy-specific ones)
     fragment_annotations = []
     for col in ['fragments', 'fragment_annotations', 'explained_peaks', 'matched_fragments',
@@ -352,53 +376,77 @@ def classify_annotation(stats: Dict, thresholds: Dict) -> str:
     """
     Classify annotation as good, bad, or uncertain based on thresholds.
 
+    For MSBuddy, uses FDR (False Discovery Rate) as the primary quality metric.
+    FDR is the estimated probability that the annotation is incorrect.
+
     Args:
         stats: Dictionary with calculated statistics
         thresholds: Dictionary with threshold values
 
     Returns:
-        Classification: 'good', 'bad', or 'uncertain'
+        Classification: 'good', 'bad', 'uncertain', or 'no_annotation'
     """
     # Check if annotation exists (has a formula)
-    if stats.get('msbuddy_score') is None:
+    if stats.get('formula') is None or stats.get('formula') == '':
         return 'no_annotation'
 
-    # Count how many criteria are met
+    # MSBuddy-specific: Use FDR as primary quality metric
+    if stats.get('estimated_fdr') is not None:
+        fdr = stats['estimated_fdr']
+
+        # FDR-based classification
+        # FDR < 0.01: High confidence (1% false discovery rate)
+        # FDR < 0.05: Good confidence (5% false discovery rate)
+        # FDR < 0.2: Moderate confidence
+        # FDR >= 0.2: Low confidence
+
+        if fdr < 0.01:
+            return 'good'
+        elif fdr < 0.05:
+            return 'good'
+        elif fdr < 0.2:
+            return 'uncertain'
+        else:
+            return 'bad'
+
+    # Fallback: If no FDR available, use fragment-based metrics
+    # (This is for compatibility with other annotation tools)
     criteria_met = 0
     total_criteria = 0
 
     # Criterion 1: MSBuddy score
     if stats.get('msbuddy_score') is not None:
         total_criteria += 1
-        if stats['msbuddy_score'] >= thresholds['score_threshold']:
+        if stats['msbuddy_score'] >= thresholds.get('score_threshold', 0.7):
             criteria_met += 1
 
     # Criterion 2: Explained peaks percentage
-    if stats.get('explained_peaks_pct') is not None:
+    if stats.get('explained_peaks_pct') is not None and stats.get('explained_peaks_pct') > 0:
         total_criteria += 1
-        if stats['explained_peaks_pct'] >= thresholds['explained_peaks_pct_threshold'] * 100:
+        if stats['explained_peaks_pct'] >= thresholds.get('explained_peaks_pct_threshold', 0.5) * 100:
             criteria_met += 1
 
     # Criterion 3: Explained intensity percentage
-    if stats.get('explained_intensity_pct') is not None:
+    if stats.get('explained_intensity_pct') is not None and stats.get('explained_intensity_pct') > 0:
         total_criteria += 1
-        if stats['explained_intensity_pct'] >= thresholds['explained_intensity_pct_threshold'] * 100:
+        if stats['explained_intensity_pct'] >= thresholds.get('explained_intensity_pct_threshold', 0.6) * 100:
             criteria_met += 1
 
     # Criterion 4: Mass error
     if stats.get('mass_error_ppm') is not None:
         total_criteria += 1
-        if abs(stats['mass_error_ppm']) <= thresholds['mass_error_threshold']:
+        if abs(stats['mass_error_ppm']) <= thresholds.get('mass_error_threshold', 5.0):
             criteria_met += 1
 
     # Criterion 5: Minimum explained peaks count
-    if stats.get('num_explained_peaks') is not None:
+    if stats.get('num_explained_peaks') is not None and stats.get('num_explained_peaks') > 0:
         total_criteria += 1
-        if stats['num_explained_peaks'] >= thresholds['min_explained_peaks']:
+        if stats['num_explained_peaks'] >= thresholds.get('min_explained_peaks', 3):
             criteria_met += 1
 
     # Classification logic
     if total_criteria == 0:
+        # No quality metrics available, but formula exists
         return 'uncertain'
 
     criteria_ratio = criteria_met / total_criteria
@@ -418,8 +466,10 @@ def main():
     print(f"Loading MGF spectra from: {args.mgf}")
     spectra_dict = load_mgf_spectra(args.mgf)
     print(f"Loaded {len(spectra_dict)} spectra")
+    if len(spectra_dict) > 0:
+        print(f"Sample spectrum IDs from MGF: {list(spectra_dict.keys())[:5]}")
 
-    print(f"Loading MSBuddy annotations from: {args.msbuddy_tsv}")
+    print(f"\nLoading MSBuddy annotations from: {args.msbuddy_tsv}")
     annotations_df = load_msbuddy_annotations(args.msbuddy_tsv)
     print(f"Loaded {len(annotations_df)} annotations")
     print(f"\nMSBuddy TSV columns: {list(annotations_df.columns)}")
@@ -427,6 +477,7 @@ def main():
     if len(annotations_df) > 0:
         for col in list(annotations_df.columns)[:10]:
             print(f"  {col}: {annotations_df.iloc[0][col]}")
+        print(f"\nSample identifiers from TSV: {list(annotations_df['identifier'].head())}")
 
     # Prepare thresholds dictionary
     thresholds = {
@@ -465,6 +516,9 @@ def main():
     if 'mass_error_ppm' not in annotations_df.columns:
         annotations_df['mass_error_ppm'] = [s['mass_error_ppm'] for s in stats_list]
 
+    # Note: estimated_fdr is already in annotations_df from MSBuddy output
+    # Just verify it's there for the summary statistics
+
     # Save enhanced annotations
     print(f"Saving enhanced annotations to: {args.output}")
     annotations_df.to_csv(args.output, sep='\t', index=False)
@@ -478,15 +532,27 @@ def main():
 
     print("\n=== Quality Statistics ===")
     if stats_list:
+        # MSBuddy FDR statistics
+        fdr_values = [s['estimated_fdr'] for s in stats_list if s['estimated_fdr'] is not None]
+        if fdr_values:
+            print(f"FDR Statistics (MSBuddy):")
+            print(f"  Mean FDR: {np.mean(fdr_values):.4f}")
+            print(f"  Median FDR: {np.median(fdr_values):.4f}")
+            print(f"  FDR < 0.01 (high confidence): {sum(1 for f in fdr_values if f < 0.01)} ({sum(1 for f in fdr_values if f < 0.01)/len(fdr_values)*100:.1f}%)")
+            print(f"  FDR < 0.05 (good confidence): {sum(1 for f in fdr_values if f < 0.05)} ({sum(1 for f in fdr_values if f < 0.05)/len(fdr_values)*100:.1f}%)")
+            print(f"  FDR < 0.2 (moderate): {sum(1 for f in fdr_values if f < 0.2)} ({sum(1 for f in fdr_values if f < 0.2)/len(fdr_values)*100:.1f}%)")
+
+        # Fragment explanation statistics (if available)
         explained_peaks_pcts = [s['explained_peaks_pct'] for s in stats_list if s['explained_peaks_pct'] > 0]
         if explained_peaks_pcts:
-            print(f"Mean explained peaks: {np.mean(explained_peaks_pcts):.1f}%")
-            print(f"Median explained peaks: {np.median(explained_peaks_pcts):.1f}%")
+            print(f"\nFragment Explanation Statistics:")
+            print(f"  Mean explained peaks: {np.mean(explained_peaks_pcts):.1f}%")
+            print(f"  Median explained peaks: {np.median(explained_peaks_pcts):.1f}%")
 
         explained_intensity_pcts = [s['explained_intensity_pct'] for s in stats_list if s['explained_intensity_pct'] > 0]
         if explained_intensity_pcts:
-            print(f"Mean explained intensity: {np.mean(explained_intensity_pcts):.1f}%")
-            print(f"Median explained intensity: {np.median(explained_intensity_pcts):.1f}%")
+            print(f"  Mean explained intensity: {np.mean(explained_intensity_pcts):.1f}%")
+            print(f"  Median explained intensity: {np.median(explained_intensity_pcts):.1f}%")
 
     print("\nAnalysis complete!")
 

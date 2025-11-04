@@ -13,8 +13,10 @@ This pipeline automates the annotation and quality control reporting for mass sp
 ### Key Features
 
 - **Automated QC**: Eliminates manual inspection of annotation results
-- **Annotation Quality Classification**: Automatically classifies annotations as good/bad/uncertain based on multiple quality metrics
-- **Peak Explanation Analysis**: Calculates percentage of explained peaks and intensities for each annotation
+- **FDR-Based Quality Classification**: Uses MSBuddy's False Discovery Rate (FDR) for reliable annotation quality assessment
+- **Smart Annotation Classification**: Automatically classifies annotations as good/bad/uncertain based on statistical confidence
+- **GNPS Format Support**: Properly handles GNPS library MGF files with SPECTRUMID identifiers
+- **Peak Explanation Analysis**: Calculates percentage of explained peaks and intensities (when fragment data available)
 - **Standardized Reporting**: Consistent metrics and visualizations for every sample
 - **Configurable Quality Thresholds**: Customize criteria for good vs bad annotations
 - **Scalable**: Process any number of files with automatic parallelization
@@ -31,10 +33,11 @@ MGF Files → MSBuddy Annotation → Peak Explanation Analysis → QC Report Gen
 
 1. **ANNOTATE**: Runs MSBuddy on each input `.mgf` file to generate annotation results (`.tsv`)
 2. **ANALYZE_PEAK_EXPLANATION**: Analyzes MSBuddy results to:
-   - Calculate percentage of explained peaks for each spectrum
-   - Calculate percentage of explained intensity for each spectrum
-   - Classify annotations as good/bad/uncertain based on configurable thresholds
-   - Output enhanced TSV with quality metrics
+   - Extract FDR (False Discovery Rate) from MSBuddy predictions
+   - Classify annotations as good/bad/uncertain based on FDR thresholds
+   - Calculate total peaks per spectrum for quality assessment
+   - Match spectrum identifiers (SPECTRUMID) between MGF and TSV files
+   - Output enhanced TSV with quality metrics and classifications
 3. **GENERATE_QC**: Creates comprehensive HTML QC reports with:
    - Overall annotation rate
    - Annotation quality classification breakdown
@@ -222,15 +225,39 @@ results/
 
 - **Annotations** (`annotations/`): Raw MSBuddy annotation results in TSV format
 - **Enhanced Annotations** (`annotations_enhanced/`): Annotations with added quality metrics including:
-  - `annotation_quality`: Classification (good/bad/uncertain/no_annotation)
-  - `num_explained_peaks`: Number of peaks explained by the annotation
+  - `annotation_quality`: Classification (good/bad/uncertain/no_annotation) based on FDR
+  - `estimated_fdr`: MSBuddy False Discovery Rate (primary quality metric)
+  - `formula_rank_1`: Top-ranked molecular formula prediction
   - `total_peaks`: Total number of peaks in the spectrum
-  - `explained_peaks_pct`: Percentage of explained peaks
-  - `explained_intensity_pct`: Percentage of explained intensity
-  - `msbuddy_score`: MSBuddy confidence score
-  - `mass_error_ppm`: Mass error in ppm
+  - `num_explained_peaks`: Number of peaks explained (when fragment data available)
+  - `explained_peaks_pct`: Percentage of explained peaks (when fragment data available)
+  - `explained_intensity_pct`: Percentage of explained intensity (when fragment data available)
+  - `msbuddy_score`: MSBuddy confidence score (if available)
+  - `mass_error_ppm`: Mass error in ppm (if available)
 - **QC Reports** (`qc_reports/`): Self-contained HTML reports with visualizations
 - **Pipeline Info** (`pipeline_info/`): Execution metrics, timeline, and DAG
+
+## Annotation Quality Classification
+
+The pipeline uses **FDR (False Discovery Rate)** as the primary metric for classifying annotation quality. FDR represents the estimated probability that an annotation is incorrect.
+
+### FDR-Based Classification Thresholds
+
+| Classification | FDR Range | Meaning | Confidence Level |
+|----------------|-----------|---------|------------------|
+| **Good** | FDR < 0.05 | Less than 5% chance of being wrong | High confidence |
+| **Uncertain** | 0.05 ≤ FDR < 0.2 | 5-20% chance of being wrong | Moderate confidence |
+| **Bad** | FDR ≥ 0.2 | 20%+ chance of being wrong | Low confidence |
+| **No Annotation** | N/A | No molecular formula predicted | N/A |
+
+### Why FDR-Based Classification?
+
+- **Statistical Rigor**: FDR provides a probabilistic measure of annotation reliability
+- **MSBuddy Native**: Uses the confidence metric that MSBuddy naturally provides
+- **Interpretable**: Easy to understand what FDR < 0.01 means (99% confidence)
+- **Standard in Field**: FDR is widely used in metabolomics and proteomics
+
+**Note**: MSBuddy predicts molecular formulas but does not provide MS/MS fragment explanations. Therefore, peak explanation metrics (explained peaks %, explained intensity %) are not used for quality classification with MSBuddy, but are retained for compatibility with other annotation tools.
 
 ## QC Report Contents
 
@@ -373,6 +400,18 @@ For issues, questions, or contributions:
 - Contact: [your.email@example.com]
 
 ## Changelog
+
+### Version 2.1.1 (2025-11-04)
+- **FIXED**: Spectrum ID matching to properly use SPECTRUMID field from GNPS MGF format
+- **IMPROVED**: Classification logic now uses FDR (False Discovery Rate) as primary quality metric
+- **NEW**: FDR-based annotation quality classification for MSBuddy:
+  - `FDR < 0.01`: High confidence (good)
+  - `FDR < 0.05`: Good confidence (good)
+  - `FDR < 0.2`: Moderate confidence (uncertain)
+  - `FDR ≥ 0.2`: Low confidence (bad)
+- **NEW**: Enhanced quality statistics showing FDR distribution
+- **NOTE**: MSBuddy provides molecular formula predictions but not MS/MS fragment explanations
+- **NOTE**: Peak explanation metrics are retained for compatibility with other annotation tools
 
 ### Version 2.1 (2025-10-30)
 - **NEW**: Peak explanation analysis with calculation of explained peaks and intensity percentages
