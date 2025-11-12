@@ -38,7 +38,7 @@ RUN pip install --no-cache-dir \
 # Verify installations
 RUN python -c "import pandas; print('Pandas version:', pandas.__version__)" && \
     python -c "import matplotlib; print('Matplotlib version:', matplotlib.__version__)" && \
-    python -c "import pyteomics; print('Pyteomics version:', pyteomics.__version__)" && \
+    python -c "import pyteomics.mgf; print('Pyteomics: OK')" && \
     python -c "import numpy; print('NumPy version:', numpy.__version__)" && \
     python -c "import scipy; print('SciPy version:', scipy.__version__)" && \
     python -c "import seaborn; print('Seaborn version:', seaborn.__version__)"
