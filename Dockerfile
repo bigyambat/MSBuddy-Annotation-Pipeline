@@ -1,11 +1,11 @@
-# MS Annotation & QC Pipeline Docker Image
-# Version: 2.1
+# GNPS Reference Library Annotation Pipeline Docker Image
+# Version: 3.0
 
 FROM python:3.10-slim
 
 LABEL maintainer="Bigy Ambat"
-LABEL description="Docker image for MS Annotation & QC Pipeline with MSBuddy"
-LABEL version="2.1"
+LABEL description="Docker image for GNPS Reference Library Annotation Pipeline"
+LABEL version="3.0"
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
@@ -26,45 +26,34 @@ WORKDIR /app
 # Install Python dependencies
 RUN pip install --no-cache-dir --upgrade pip
 
-# Install MSBuddy first (this will install its core dependencies)
-RUN pip install --no-cache-dir msbuddy
-
-# Install additional dependencies (some may already be installed by msbuddy)
-# Install lightgbm separately to ensure it's present
+# Install all required Python packages
 RUN pip install --no-cache-dir \
     pandas>=1.5.0 \
     matplotlib>=3.6.0 \
     seaborn>=0.12.0 \
     pyteomics>=4.5.0 \
     numpy>=1.23.0 \
-    scipy>=1.9.0 \
-    lightgbm>=3.3.0 \
-    scikit-learn>=1.0.0 \
-    joblib>=1.1.0
+    scipy>=1.9.0
 
-# Verify MSBuddy and lightgbm installation
-RUN python -c "import msbuddy; print('MSBuddy version:', msbuddy.__version__)" && \
-    python -c "import lightgbm; print('LightGBM version:', lightgbm.__version__)" && \
-    python -c "import joblib; print('Joblib version:', joblib.__version__)"
+# Verify installations
+RUN python -c "import pandas; print('Pandas version:', pandas.__version__)" && \
+    python -c "import matplotlib; print('Matplotlib version:', matplotlib.__version__)" && \
+    python -c "import pyteomics; print('Pyteomics version:', pyteomics.__version__)" && \
+    python -c "import numpy; print('NumPy version:', numpy.__version__)" && \
+    python -c "import scipy; print('SciPy version:', scipy.__version__)" && \
+    python -c "import seaborn; print('Seaborn version:', seaborn.__version__)"
 
-# Create MSBuddy data directory with write permissions
-# This fixes the "Permission denied" error when MSBuddy tries to initialize its database
-RUN mkdir -p /usr/local/lib/python3.10/site-packages/msbuddy/data && \
-    chmod -R 777 /usr/local/lib/python3.10/site-packages/msbuddy/data
+# Copy GNPS pipeline scripts
+COPY bin/parse_gnps_reference.py /usr/local/bin/
+COPY bin/annotate_peaks_gnps.py /usr/local/bin/
+COPY bin/calculate_cosine_similarity.py /usr/local/bin/
+COPY bin/generate_qc_report_gnps.py /usr/local/bin/
 
-# Alternative: Install MSBuddy from GitHub if not available on PyPI
-# Uncomment and adjust as needed:
-# RUN git clone https://github.com/Philipbear/msbuddy.git && \
-#     cd msbuddy && \
-#     pip install -e . && \
-#     cd .. && \
-#     rm -rf msbuddy
-
-# Copy pipeline scripts
-COPY bin/generate_qc_report.py /usr/local/bin/
-COPY bin/analyze_peak_explanation.py /usr/local/bin/
-RUN chmod +x /usr/local/bin/generate_qc_report.py && \
-    chmod +x /usr/local/bin/analyze_peak_explanation.py
+# Make scripts executable
+RUN chmod +x /usr/local/bin/parse_gnps_reference.py && \
+    chmod +x /usr/local/bin/annotate_peaks_gnps.py && \
+    chmod +x /usr/local/bin/calculate_cosine_similarity.py && \
+    chmod +x /usr/local/bin/generate_qc_report_gnps.py
 
 # Add /usr/local/bin to PATH
 ENV PATH="/usr/local/bin:${PATH}"
