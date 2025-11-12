@@ -1,15 +1,15 @@
 #!/bin/bash
 
 ################################################################################
-# MS Annotation & QC Pipeline - Build and Test Script
+# GNPS Reference Library Annotation Pipeline - Build and Test Script
 # Author: Bigy Ambat
-# Version: 2.0
+# Version: 3.0
 ################################################################################
 
 set -e  # Exit on error
 
 echo "========================================="
-echo " MS Annotation & QC Pipeline Setup"
+echo " GNPS Annotation Pipeline Setup"
 echo "========================================="
 echo ""
 
@@ -21,14 +21,16 @@ usage() {
     echo "  -b, --build              Build Docker image"
     echo "  -t, --test               Run test pipeline"
     echo "  -c, --clean              Clean work directory and results"
-    echo "  -i, --instrument <type>  Set MS instrument type (qtof, orbitrap, fticr)"
+    echo "  -m, --mz-tol <value>     Set m/z tolerance in Da (default: 0.01)"
+    echo "  -p, --ppm-tol <value>    Set PPM tolerance (default: 20.0)"
+    echo "  -s, --min-sim <value>    Set minimum similarity (default: 0.5)"
     echo "  -h, --help               Display this help message"
     echo ""
     echo "Examples:"
     echo "  $0 --build               # Build Docker image"
-    echo "  $0 --test                # Run test with Docker (default: orbitrap)"
+    echo "  $0 --test                # Run test with Docker"
     echo "  $0 --build --test        # Build image and run test"
-    echo "  $0 --test --instrument qtof   # Run test with QTOF instrument type"
+    echo "  $0 --test --mz-tol 0.005 --ppm-tol 5   # High-resolution data"
     echo ""
 }
 
@@ -36,7 +38,9 @@ usage() {
 BUILD=false
 TEST=false
 CLEAN=false
-INSTRUMENT_TYPE=""
+MZ_TOL=""
+PPM_TOL=""
+MIN_SIM=""
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -52,8 +56,16 @@ while [[ $# -gt 0 ]]; do
             CLEAN=true
             shift
             ;;
-        -i|--instrument)
-            INSTRUMENT_TYPE="$2"
+        -m|--mz-tol)
+            MZ_TOL="$2"
+            shift 2
+            ;;
+        -p|--ppm-tol)
+            PPM_TOL="$2"
+            shift 2
+            ;;
+        -s|--min-sim)
+            MIN_SIM="$2"
             shift 2
             ;;
         -h|--help)
@@ -86,7 +98,7 @@ fi
 # Build Docker image
 if [[ "$BUILD" == true ]]; then
     echo "Building Docker image..."
-    docker build -t ms-annotation-qc:latest .
+    docker build -t gnps-annotation:latest .
     echo "✓ Docker image built successfully"
     echo ""
 fi
@@ -96,8 +108,9 @@ if [[ "$TEST" == true ]]; then
     echo "Checking for test data..."
 
     if ! ls test_data/*.mgf 1> /dev/null 2>&1; then
-        echo "⚠ No MGF files found in test_data/"
-        echo "Please add test MGF files to test_data/ directory"
+        echo "⚠ No GNPS MGF files found in test_data/"
+        echo "Please add GNPS MGF files to test_data/ directory"
+        echo "Files must contain SMILES and FORMULA fields"
         echo "See test_data/README.md for more information"
         exit 1
     fi
@@ -106,29 +119,65 @@ if [[ "$TEST" == true ]]; then
     ls -1 test_data/*.mgf
     echo ""
 
+    # Validate MGF has required GNPS fields
+    echo "Validating GNPS MGF format..."
+    if ! grep -q "SMILES" test_data/*.mgf; then
+        echo "⚠ Warning: No SMILES field found in MGF files"
+        echo "GNPS MGF files should contain SMILES and FORMULA fields"
+    fi
+    if ! grep -q -E "FORMULA|MOLECULARFORMULA" test_data/*.mgf; then
+        echo "⚠ Warning: No FORMULA field found in MGF files"
+        echo "GNPS MGF files should contain SMILES and FORMULA fields"
+    fi
+    echo ""
+
     # Build nextflow command
     NF_CMD="nextflow run main.nf --input 'test_data/*.mgf' --outdir results -profile test,docker -resume"
 
-    # Add instrument type if specified
-    if [[ -n "$INSTRUMENT_TYPE" ]]; then
-        echo "Using instrument type: $INSTRUMENT_TYPE"
-        NF_CMD="$NF_CMD --ms_instrument_type $INSTRUMENT_TYPE"
+    # Add custom parameters if specified
+    if [[ -n "$MZ_TOL" ]]; then
+        echo "Using m/z tolerance: $MZ_TOL Da"
+        NF_CMD="$NF_CMD --mz_tol $MZ_TOL"
     else
-        echo "Using default instrument type (orbitrap)"
+        echo "Using default m/z tolerance (0.01 Da)"
+    fi
+
+    if [[ -n "$PPM_TOL" ]]; then
+        echo "Using PPM tolerance: $PPM_TOL"
+        NF_CMD="$NF_CMD --ppm_tol $PPM_TOL"
+    else
+        echo "Using default PPM tolerance (20.0)"
+    fi
+
+    if [[ -n "$MIN_SIM" ]]; then
+        echo "Using minimum similarity: $MIN_SIM"
+        NF_CMD="$NF_CMD --min_similarity $MIN_SIM"
+    else
+        echo "Using default minimum similarity (0.5)"
     fi
 
     echo ""
-    echo "Running test pipeline with Docker..."
+    echo "Running GNPS annotation pipeline with Docker..."
     eval $NF_CMD
 
     echo ""
     echo "✓ Test completed successfully"
     echo ""
     echo "Check results in:"
-    echo "  - Annotations: results/annotations/"
-    echo "  - QC Reports:  results/qc_reports/"
+    echo "  - Reference:    results/reference/"
+    echo "  - Annotations:  results/annotations/"
+    echo "  - Similarity:   results/similarity/"
+    echo "  - QC Reports:   results/qc_reports/"
     echo "  - Pipeline Info: results/pipeline_info/"
     echo ""
+
+    # Display summary if available
+    if [ -f results/qc_reports/*.html ]; then
+        echo "QC Reports generated:"
+        ls -1 results/qc_reports/*.html
+        echo ""
+        echo "Open the HTML reports in your browser to view results"
+    fi
 fi
 
 echo "========================================="
