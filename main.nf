@@ -2,11 +2,12 @@
 
 /*
 ========================================================================================
-    Mass Spectrum Annotation & QC Pipeline
+    GNPS Reference Library Annotation Pipeline
 ========================================================================================
     Author: Bigy Ambat
-    Version: 2.0
-    Description: Nextflow pipeline for automated MS annotation and QC reporting
+    Version: 3.0
+    Description: Nextflow pipeline for GNPS reference library quality assessment
+                 and spectral similarity analysis
 ----------------------------------------------------------------------------------------
 */
 
@@ -16,28 +17,27 @@ nextflow.enable.dsl=2
 def printHeader() {
     log.info """\
     ========================================
-     MS ANNOTATION & QC PIPELINE v2.1
+     GNPS LIBRARY ANNOTATION PIPELINE v3.0
     ========================================
     Input files    : ${params.input}
     Output dir     : ${params.outdir}
 
-    MSBuddy Settings:
-    Instrument type: ${params.ms_instrument_type}
-    MS1 tolerance  : ${params.ms1_tol} ppm
-    MS2 tolerance  : ${params.ms2_tol} ppm
-    Timeout        : ${params.timeout_secs} seconds
-    Detailed output: ${params.msbuddy_details}
+    GNPS Settings:
+    m/z tolerance  : ${params.mz_tol} Da
+    PPM tolerance  : ${params.ppm_tol} ppm
+    Min peaks      : ${params.min_peaks}
+    Cosine top N   : ${params.cosine_top_n}
+    Min similarity : ${params.min_similarity}
 
     Resources:
     Max memory     : ${params.max_memory}
     Max CPUs       : ${params.max_cpus}
 
     Quality Thresholds:
-    Score          : ${params.score_threshold}
-    Explained peaks: ${params.explained_peaks_pct_threshold}
-    Explained int. : ${params.explained_intensity_pct_threshold}
-    Mass error     : ${params.mass_error_threshold} ppm
+    Good score     : ${params.quality_threshold_good}
+    Uncertain score: ${params.quality_threshold_uncertain}
     Min peaks      : ${params.min_explained_peaks}
+    Min intensity  : ${params.min_explained_intensity}
     ========================================
     """
 }
@@ -51,157 +51,125 @@ printHeader()
 */
 
 if (!params.input) {
-    exit 1, "Error: Please provide input MGF files using --input parameter"
+    exit 1, "Error: Please provide input GNPS MGF files using --input parameter"
 }
 
 /*
 ========================================================================================
-    PROCESS: ANNOTATE
+    GNPS PROCESSES
 ========================================================================================
-    Runs MSBuddy annotation on each input MGF file
 */
 
-process ANNOTATE {
+/*
+========================================================================================
+    PROCESS: PARSE_GNPS_REFERENCE
+========================================================================================
+    Extracts reference annotations from GNPS MGF files
+*/
+
+process PARSE_GNPS_REFERENCE {
     tag "${mgf_file.baseName}"
-    publishDir "${params.outdir}/annotations", mode: 'copy'
+    publishDir "${params.outdir}/reference", mode: 'copy'
 
     input:
     path mgf_file
 
     output:
-    tuple path(mgf_file), path("${mgf_file.baseName}_msbuddy.tsv"), emit: annotated
+    tuple path(mgf_file), path("${mgf_file.baseName}_reference.tsv"), emit: reference
 
     script:
     """
-    echo "=== Starting MSBuddy annotation ==="
-    echo "Input file: ${mgf_file}"
-    echo "Output file: ${mgf_file.baseName}_msbuddy.tsv"
-    echo "MS1 tolerance: ${params.ms1_tol} ppm"
-    echo "MS2 tolerance: ${params.ms2_tol} ppm"
-    echo "Timeout: ${params.timeout_secs} seconds"
-    echo "CPUs: ${task.cpus}"
-    echo "Memory: ${task.memory}"
-    echo ""
-
-    # Check if input file exists and is readable
-    if [ ! -f "${mgf_file}" ]; then
-        echo "ERROR: Input file ${mgf_file} not found!"
-        exit 1
-    fi
-
-    echo "Input file size: \$(ls -lh ${mgf_file} | awk '{print \$5}')"
-    echo "Input file lines: \$(wc -l < ${mgf_file})"
-    echo ""
-
-    # Run MSBuddy annotation with verbose output
-    echo "Running MSBuddy..."
-    echo "Instrument type: ${params.ms_instrument_type}"
-    echo "Detailed output: ${params.msbuddy_details}"
-    msbuddy \\
-        -mgf ${mgf_file} \\
-        -output ${mgf_file.baseName}_msbuddy.tsv \\
-        -ms1_tol ${params.ms1_tol} \\
-        -ms2_tol ${params.ms2_tol} \\
-        -timeout_secs ${params.timeout_secs} \\
-        -ms ${params.ms_instrument_type} \\
-        -details \\
-        -parallel \\
-        -n_cpu ${task.cpus}
-
-    echo ""
-    echo "=== MSBuddy annotation completed ==="
-    echo "Checking MSBuddy output structure..."
-    ls -la
-
-    # MSBuddy creates a directory with msbuddy_result_summary.tsv inside
-    # Move the actual results file to the expected output name
-    if [ -d "${mgf_file.baseName}_msbuddy.tsv" ]; then
-        echo "MSBuddy created output directory (as expected)"
-        ls -la "${mgf_file.baseName}_msbuddy.tsv/"
-
-        if [ -f "${mgf_file.baseName}_msbuddy.tsv/msbuddy_result_summary.tsv" ]; then
-            echo "Extracting msbuddy_result_summary.tsv from directory..."
-            cp "${mgf_file.baseName}_msbuddy.tsv/msbuddy_result_summary.tsv" "${mgf_file.baseName}_msbuddy_temp.tsv"
-            rm -rf "${mgf_file.baseName}_msbuddy.tsv"
-            mv "${mgf_file.baseName}_msbuddy_temp.tsv" "${mgf_file.baseName}_msbuddy.tsv"
-            echo "Successfully extracted results file"
-        else
-            echo "ERROR: msbuddy_result_summary.tsv not found in directory"
-            ls -la "${mgf_file.baseName}_msbuddy.tsv/"
-            exit 1
-        fi
-    elif [ -f "${mgf_file.baseName}_msbuddy.tsv" ]; then
-        echo "MSBuddy created file directly (unexpected but OK)"
-    else
-        echo "ERROR: MSBuddy output not found in expected location"
-        exit 1
-    fi
-
-    # Verify the output file exists and is a regular file
-    if [ -f "${mgf_file.baseName}_msbuddy.tsv" ]; then
-        echo "Output file size: \$(ls -lh ${mgf_file.baseName}_msbuddy.tsv | awk '{print \$5}')"
-        echo "Output file lines: \$(wc -l < ${mgf_file.baseName}_msbuddy.tsv)"
-    else
-        echo "ERROR: Output file is not a regular file!"
-        ls -la ${mgf_file.baseName}_msbuddy.tsv*
-        exit 1
-    fi
+    parse_gnps_reference.py \\
+        --mgf ${mgf_file} \\
+        --output ${mgf_file.baseName}_reference.tsv \\
+        --min_peaks ${params.min_peaks}
     """
 }
 
 /*
 ========================================================================================
-    PROCESS: ANALYZE_PEAK_EXPLANATION
+    PROCESS: ANNOTATE_PEAKS_GNPS
 ========================================================================================
-    Analyzes peak explanation and classifies annotations as good/bad
+    Annotates peaks using GNPS reference formulas
 */
 
-process ANALYZE_PEAK_EXPLANATION {
+process ANNOTATE_PEAKS_GNPS {
     tag "${mgf_file.baseName}"
-    publishDir "${params.outdir}/annotations_enhanced", mode: 'copy'
+    publishDir "${params.outdir}/annotations", mode: 'copy'
 
     input:
-    tuple path(mgf_file), path(tsv_file)
+    tuple path(mgf_file), path(reference_tsv)
 
     output:
-    tuple path(mgf_file), path("${mgf_file.baseName}_enhanced.tsv"), emit: enhanced
+    tuple path(mgf_file), path("${mgf_file.baseName}_annotated.tsv"), emit: annotated
 
     script:
     """
-    analyze_peak_explanation.py \\
+    annotate_peaks_gnps.py \\
         --mgf ${mgf_file} \\
-        --msbuddy_tsv ${tsv_file} \\
-        --output ${mgf_file.baseName}_enhanced.tsv \\
-        --score_threshold ${params.score_threshold} \\
-        --explained_peaks_pct_threshold ${params.explained_peaks_pct_threshold} \\
-        --explained_intensity_pct_threshold ${params.explained_intensity_pct_threshold} \\
-        --mass_error_threshold ${params.mass_error_threshold} \\
-        --min_explained_peaks ${params.min_explained_peaks}
+        --reference ${reference_tsv} \\
+        --output ${mgf_file.baseName}_annotated.tsv \\
+        --mz_tolerance ${params.mz_tol} \\
+        --ppm_tolerance ${params.ppm_tol} \\
+        --min_explained_peaks ${params.min_explained_peaks} \\
+        --min_explained_intensity ${params.min_explained_intensity} \\
+        --quality_threshold_good ${params.quality_threshold_good} \\
+        --quality_threshold_uncertain ${params.quality_threshold_uncertain}
     """
 }
 
 /*
 ========================================================================================
-    PROCESS: GENERATE_QC
+    PROCESS: CALCULATE_COSINE_SIMILARITY
 ========================================================================================
-    Generates HTML QC report from MGF file and enhanced annotation results
+    Calculates pairwise cosine similarity between spectra
 */
 
-process GENERATE_QC {
+process CALCULATE_COSINE_SIMILARITY {
+    tag "${mgf_file.baseName}"
+    publishDir "${params.outdir}/similarity", mode: 'copy'
+
+    input:
+    tuple path(mgf_file), path(annotations_tsv)
+
+    output:
+    tuple path(mgf_file), path("${mgf_file.baseName}_with_similarity.tsv"), emit: with_similarity
+
+    script:
+    """
+    calculate_cosine_similarity.py \\
+        --mgf ${mgf_file} \\
+        --annotations ${annotations_tsv} \\
+        --output ${mgf_file.baseName}_with_similarity.tsv \\
+        --mz_tolerance ${params.mz_tol} \\
+        --min_peaks ${params.min_peaks} \\
+        --top_n ${params.cosine_top_n} \\
+        --min_similarity ${params.min_similarity} \\
+        --intensity_power 0.5
+    """
+}
+
+/*
+========================================================================================
+    PROCESS: GENERATE_QC_GNPS
+========================================================================================
+    Generates HTML QC report for GNPS workflow
+*/
+
+process GENERATE_QC_GNPS {
     tag "${mgf_file.baseName}"
     publishDir "${params.outdir}/qc_reports", mode: 'copy'
 
     input:
-    tuple path(mgf_file), path(tsv_file)
+    tuple path(mgf_file), path(annotations_tsv)
 
     output:
     path "${mgf_file.baseName}_qc_report.html", emit: qc_report
 
     script:
     """
-    generate_qc_report.py \\
-        --mgf ${mgf_file} \\
-        --tsv ${tsv_file} \\
+    generate_qc_report_gnps.py \\
+        --annotations ${annotations_tsv} \\
         --output ${mgf_file.baseName}_qc_report.html \\
         --sample_name ${mgf_file.baseName}
     """
@@ -217,35 +185,39 @@ workflow {
     // Create channel from input MGF files
     mgf_files_ch = Channel
         .fromPath(params.input, checkIfExists: true)
-        .ifEmpty { exit 1, "No MGF files found matching pattern: ${params.input}" }
+        .ifEmpty { exit 1, "No GNPS MGF files found matching pattern: ${params.input}" }
 
     // Display number of files to process
     mgf_files_ch
         .count()
         .subscribe { count ->
-            log.info "Found ${count} MGF file(s) to process"
+            log.info "Found ${count} GNPS MGF file(s) to process"
         }
 
-    // Run annotation process
-    ANNOTATE(mgf_files_ch)
+    // Parse GNPS reference annotations
+    PARSE_GNPS_REFERENCE(mgf_files_ch)
 
-    // Analyze peak explanation and classify annotations
-    ANALYZE_PEAK_EXPLANATION(ANNOTATE.out.annotated)
+    // Annotate peaks using reference formulas
+    ANNOTATE_PEAKS_GNPS(PARSE_GNPS_REFERENCE.out.reference)
 
-    // Run QC report generation on enhanced annotations
-    GENERATE_QC(ANALYZE_PEAK_EXPLANATION.out.enhanced)
+    // Calculate cosine similarity
+    CALCULATE_COSINE_SIMILARITY(ANNOTATE_PEAKS_GNPS.out.annotated)
+
+    // Generate QC report
+    GENERATE_QC_GNPS(CALCULATE_COSINE_SIMILARITY.out.with_similarity)
 
     // Log completion
-    GENERATE_QC.out.qc_report
+    GENERATE_QC_GNPS.out.qc_report
         .collect()
         .subscribe { reports ->
             log.info """\
             ========================================
-             Pipeline completed successfully!
+             GNPS Pipeline completed successfully!
             ========================================
              Generated ${reports.size()} QC report(s)
              Reports available in: ${params.outdir}/qc_reports
-             Enhanced annotations in: ${params.outdir}/annotations_enhanced
+             Annotations in: ${params.outdir}/annotations
+             Similarity data in: ${params.outdir}/similarity
             ========================================
             """.stripIndent()
         }
