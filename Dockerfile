@@ -33,7 +33,8 @@ RUN pip install --no-cache-dir \
     seaborn>=0.12.0 \
     pyteomics>=4.5.0 \
     numpy>=1.23.0 \
-    scipy>=1.9.0
+    scipy>=1.9.0 \
+    rdkit>=2022.9.1
 
 # Verify installations
 RUN python -c "import pandas; print('Pandas version:', pandas.__version__)" && \
@@ -41,7 +42,8 @@ RUN python -c "import pandas; print('Pandas version:', pandas.__version__)" && \
     python -c "import pyteomics.mgf; print('Pyteomics: OK')" && \
     python -c "import numpy; print('NumPy version:', numpy.__version__)" && \
     python -c "import scipy; print('SciPy version:', scipy.__version__)" && \
-    python -c "import seaborn; print('Seaborn version:', seaborn.__version__)"
+    python -c "import seaborn; print('Seaborn version:', seaborn.__version__)" && \
+    python -c "from rdkit import Chem; print('RDKit: OK')"
 
 # Copy GNPS pipeline scripts
 COPY bin/parse_gnps_reference.py /usr/local/bin/

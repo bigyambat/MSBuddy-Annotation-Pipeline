@@ -18,10 +18,18 @@ import re
 from collections import defaultdict
 
 try:
-    from pyteomics import mgf
+    from pyteomics import mgf, mass
 except ImportError:
     print("Error: pyteomics not installed. Install with: pip install pyteomics", file=sys.stderr)
     sys.exit(1)
+
+# Try to import RDKit for SMILES to formula conversion
+try:
+    from rdkit import Chem
+    from rdkit.Chem import rdMolDescriptors
+    RDKIT_AVAILABLE = True
+except ImportError:
+    RDKIT_AVAILABLE = False
 
 
 def parse_args():
@@ -49,6 +57,30 @@ def parse_args():
     )
 
     return parser.parse_args()
+
+
+def smiles_to_formula(smiles: str) -> str:
+    """
+    Convert SMILES to molecular formula using RDKit.
+
+    Args:
+        smiles: SMILES string
+
+    Returns:
+        Molecular formula string (e.g., 'C6H12O6')
+    """
+    if not RDKIT_AVAILABLE or not smiles:
+        return ''
+
+    try:
+        mol = Chem.MolFromSmiles(smiles)
+        if mol is not None:
+            formula = rdMolDescriptors.CalcMolFormula(mol)
+            return formula
+    except Exception as e:
+        print(f"Warning: Could not convert SMILES to formula: {e}", file=sys.stderr)
+
+    return ''
 
 
 def parse_molecular_formula(formula_str: str) -> Dict[str, int]:
@@ -243,8 +275,15 @@ def parse_gnps_mgf(mgf_path: str, min_peaks: int = 3) -> pd.DataFrame:
     try:
         with mgf.read(mgf_path, use_index=False) as reader:
             for idx, spectrum in enumerate(reader):
+                # Skip None spectra
+                if spectrum is None:
+                    skipped += 1
+                    continue
+
                 # Extract spectrum parameters
                 params = spectrum.get('params', {})
+                if params is None:
+                    params = {}
 
                 # Extract spectrum ID (priority order)
                 spec_id = (
@@ -268,13 +307,27 @@ def parse_gnps_mgf(mgf_path: str, min_peaks: int = 3) -> pd.DataFrame:
                     skipped += 1
                     continue
 
-                # Extract GNPS-specific fields
-                smiles = params.get('smiles', '')
-                inchi = params.get('inchi', '')
-                inchikey = params.get('inchikey', '')
-                formula = params.get('formula', '') or params.get('molecularformula', '')
-                compound_name = params.get('name', '') or params.get('compound_name', '')
-                library_id = params.get('spectrumid', '')
+                # Extract GNPS-specific fields (case-insensitive)
+                smiles = (params.get('smiles', '') or params.get('SMILES', ''))
+                inchi = (params.get('inchi', '') or params.get('INCHI', ''))
+                inchikey = (params.get('inchikey', '') or params.get('INCHIKEY', ''))
+                formula = (params.get('formula', '') or
+                          params.get('FORMULA', '') or
+                          params.get('molecularformula', '') or
+                          params.get('MOLECULARFORMULA', ''))
+
+                # If no formula but SMILES available, calculate from SMILES
+                if not formula and smiles:
+                    formula = smiles_to_formula(smiles)
+                    if formula:
+                        print(f"  Calculated formula from SMILES for spectrum {spec_id}: {formula}", file=sys.stderr)
+
+                compound_name = (params.get('name', '') or
+                                params.get('NAME', '') or
+                                params.get('compound_name', '') or
+                                params.get('COMPOUND_NAME', ''))
+                library_id = (params.get('spectrumid', '') or
+                             params.get('SPECTRUMID', ''))
 
                 # Extract precursor information
                 pepmass = params.get('pepmass')
@@ -334,7 +387,13 @@ def parse_gnps_mgf(mgf_path: str, min_peaks: int = 3) -> pd.DataFrame:
                     print(f"Processed {idx + 1} spectra...")
 
     except Exception as e:
+        import traceback
         print(f"Error reading MGF file: {e}", file=sys.stderr)
+        print(f"\nFull error traceback:", file=sys.stderr)
+        traceback.print_exc()
+        print(f"\nMGF file path: {mgf_path}", file=sys.stderr)
+        print(f"File exists: {Path(mgf_path).exists()}", file=sys.stderr)
+        print(f"File size: {Path(mgf_path).stat().st_size if Path(mgf_path).exists() else 'N/A'} bytes", file=sys.stderr)
         sys.exit(1)
 
     print(f"Parsed {len(records)} spectra (skipped {skipped} with insufficient peaks)")
