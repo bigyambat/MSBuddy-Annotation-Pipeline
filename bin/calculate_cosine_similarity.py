@@ -104,6 +104,11 @@ def load_mgf_spectra(mgf_path: str) -> Dict:
     try:
         with mgf.read(mgf_path, use_index=False) as reader:
             for idx, spectrum in enumerate(reader):
+                # Skip None spectra (can occur with malformed MGF entries)
+                if spectrum is None:
+                    skipped += 1
+                    continue
+
                 params = spectrum.get('params', {})
 
                 # Extract spectrum ID

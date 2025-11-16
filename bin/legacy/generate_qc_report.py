@@ -76,7 +76,7 @@ def count_spectra_from_mgf(mgf_file):
 
         # Use use_index=False to avoid empty index issues with MGF files
         with mgf.read(mgf_file, use_index=False) as reader:
-            count = sum(1 for _ in reader)
+            count = sum(1 for spectrum in reader if spectrum is not None)
 
         print(f"DEBUG: Counted {count} spectra in MGF file", file=sys.stderr)
         return count
