@@ -271,10 +271,23 @@ def parse_gnps_mgf(mgf_path: str, min_peaks: int = 3) -> pd.DataFrame:
     skipped = 0
 
     print(f"Reading MGF file: {mgf_path}")
+    print(f"File size: {Path(mgf_path).stat().st_size} bytes")
+
+    # Force flush to ensure output is visible
+    sys.stdout.flush()
+    sys.stderr.flush()
 
     try:
-        with mgf.read(mgf_path, use_index=False) as reader:
+        # Use encoding parameter to handle potential encoding issues
+        with mgf.read(mgf_path, use_index=False, encoding='utf-8', convert_arrays=1) as reader:
+            print("MGF file opened successfully, starting to parse spectra...")
+            sys.stdout.flush()
+
             for idx, spectrum in enumerate(reader):
+                # Progress indicator for debugging
+                if idx == 0:
+                    print(f"Processing first spectrum...")
+                    sys.stdout.flush()
                 # Skip None spectra
                 if spectrum is None:
                     skipped += 1
@@ -382,9 +395,10 @@ def parse_gnps_mgf(mgf_path: str, min_peaks: int = 3) -> pd.DataFrame:
 
                 records.append(record)
 
-                # Progress update
-                if (idx + 1) % 1000 == 0:
+                # Progress update - more frequent for debugging
+                if (idx + 1) % 10 == 0:
                     print(f"Processed {idx + 1} spectra...")
+                    sys.stdout.flush()
 
     except Exception as e:
         import traceback
