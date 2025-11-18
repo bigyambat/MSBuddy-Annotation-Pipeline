@@ -98,9 +98,21 @@ fi
 # Build Docker image
 if [[ "$BUILD" == true ]]; then
     echo "Building Docker image..."
-    docker build -t gnps-annotation:latest .
-    echo "✓ Docker image built successfully"
+    echo "This may take 5-10 minutes for first build (downloading conda packages)..."
     echo ""
+
+    # Build with progress output
+    docker build --progress=plain -t gnps-annotation:latest .
+
+    if [[ $? -eq 0 ]]; then
+        echo ""
+        echo "✓ Docker image built successfully"
+        echo ""
+    else
+        echo ""
+        echo "✗ Docker build failed!"
+        exit 1
+    fi
 fi
 
 # Run test

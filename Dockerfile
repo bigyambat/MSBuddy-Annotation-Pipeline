@@ -1,7 +1,7 @@
 # GNPS Reference Library Annotation Pipeline Docker Image
 # Version: 3.0
 
-FROM python:3.10-slim
+FROM continuumio/miniconda3:latest
 
 LABEL maintainer="Bigy Ambat"
 LABEL description="Docker image for GNPS Reference Library Annotation Pipeline"
@@ -23,18 +23,21 @@ RUN apt-get update && apt-get install -y \
 # Create app directory
 WORKDIR /app
 
-# Install Python dependencies
-RUN pip install --no-cache-dir --upgrade pip
+# Create conda environment and install packages
+RUN conda create -n gnps python=3.10 -y && \
+    conda install -n gnps -c conda-forge -c rdkit -y \
+    pandas \
+    matplotlib \
+    seaborn \
+    pyteomics \
+    numpy \
+    scipy \
+    rdkit && \
+    conda clean -afy
 
-# Install all required Python packages
-RUN pip install --no-cache-dir \
-    pandas>=1.5.0 \
-    matplotlib>=3.6.0 \
-    seaborn>=0.12.0 \
-    pyteomics>=4.5.0 \
-    numpy>=1.23.0 \
-    scipy>=1.9.0 \
-    rdkit>=2022.9.1
+# Activate conda environment
+ENV PATH /opt/conda/envs/gnps/bin:$PATH
+ENV CONDA_DEFAULT_ENV gnps
 
 # Verify installations
 RUN python -c "import pandas; print('Pandas version:', pandas.__version__)" && \
