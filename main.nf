@@ -33,10 +33,12 @@ def printHeader() {
     Max memory     : ${params.max_memory}
     Max CPUs       : ${params.max_cpus}
 
-    Quality Thresholds:
-    Good score     : ${params.quality_threshold_good}
-    Uncertain score: ${params.quality_threshold_uncertain}
-    Min peaks      : ${params.min_explained_peaks}
+    Quality Thresholds (Research-based):
+    Good score     : ${params.quality_threshold_good} (~1% FDR)
+    Uncertain score: ${params.quality_threshold_uncertain} (~5% FDR)
+    Min peaks (good): ${params.min_explained_peaks_good}
+    Min peaks (unc.): ${params.min_explained_peaks_uncertain}
+    Min peaks (min) : ${params.min_explained_peaks}
     Min intensity  : ${params.min_explained_intensity}
     ========================================
     """
@@ -112,6 +114,8 @@ process ANNOTATE_PEAKS_GNPS {
         --mz_tolerance ${params.mz_tol} \\
         --ppm_tolerance ${params.ppm_tol} \\
         --min_explained_peaks ${params.min_explained_peaks} \\
+        --min_explained_peaks_good ${params.min_explained_peaks_good} \\
+        --min_explained_peaks_uncertain ${params.min_explained_peaks_uncertain} \\
         --min_explained_intensity ${params.min_explained_intensity} \\
         --quality_threshold_good ${params.quality_threshold_good} \\
         --quality_threshold_uncertain ${params.quality_threshold_uncertain}

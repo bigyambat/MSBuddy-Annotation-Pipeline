@@ -49,38 +49,50 @@ def parse_args():
     parser.add_argument(
         '--mz_tolerance',
         type=float,
-        default=0.01,
-        help='m/z tolerance for peak matching (Da, default: 0.01)'
+        default=0.02,
+        help='m/z tolerance for peak matching (Da, default: 0.02 for high-res MS)'
     )
     parser.add_argument(
         '--ppm_tolerance',
         type=float,
-        default=20.0,
-        help='PPM tolerance for peak matching (default: 20 ppm)'
+        default=15.0,
+        help='PPM tolerance for peak matching (default: 15 ppm, optimal for Orbitrap)'
     )
     parser.add_argument(
         '--min_explained_peaks',
         type=int,
         default=3,
-        help='Minimum explained peaks for "good" quality (default: 3)'
+        help='Minimum explained peaks for any reportable annotation (default: 3)'
+    )
+    parser.add_argument(
+        '--min_explained_peaks_good',
+        type=int,
+        default=6,
+        help='Minimum explained peaks for "good" quality (default: 6, GNPS standard)'
+    )
+    parser.add_argument(
+        '--min_explained_peaks_uncertain',
+        type=int,
+        default=4,
+        help='Minimum explained peaks for "uncertain" quality (default: 4)'
     )
     parser.add_argument(
         '--min_explained_intensity',
         type=float,
         default=0.5,
-        help='Minimum explained intensity fraction for "good" quality (default: 0.5)'
+        help='Minimum explained intensity fraction (default: 0.5 = 50%)'
     )
     parser.add_argument(
         '--quality_threshold_good',
         type=float,
-        default=0.7,
-        help='Minimum quality score for "good" classification (default: 0.7)'
+        default=0.65,
+        help='Minimum quality score for "good" classification (default: 0.65, ~1%% FDR)'
     )
     parser.add_argument(
         '--quality_threshold_uncertain',
         type=float,
-        default=0.4,
-        help='Minimum quality score for "uncertain" classification (default: 0.4)'
+        default=0.50,
+        help='Minimum quality score for "uncertain" classification (default: 0.50, ~5%% FDR)'
     )
 
     return parser.parse_args()
@@ -372,18 +384,20 @@ def calculate_quality_score(match_stats: Dict,
 
 def classify_quality(quality_score: float,
                     num_matched: int,
-                    threshold_good: float = 0.7,
-                    threshold_uncertain: float = 0.4,
-                    min_peaks: int = 3) -> str:
+                    threshold_good: float = 0.65,
+                    threshold_uncertain: float = 0.50,
+                    min_peaks_good: int = 6,
+                    min_peaks_uncertain: int = 4) -> str:
     """
-    Classify annotation quality.
+    Classify annotation quality using tiered thresholds.
 
     Args:
         quality_score: Overall quality score (0-1)
         num_matched: Number of matched peaks
-        threshold_good: Threshold for "good" classification
-        threshold_uncertain: Threshold for "uncertain" classification
-        min_peaks: Minimum peaks for any positive classification
+        threshold_good: Threshold for "good" classification (~1% FDR, default: 0.65)
+        threshold_uncertain: Threshold for "uncertain" classification (~5% FDR, default: 0.50)
+        min_peaks_good: Minimum peaks for "good" quality (GNPS standard, default: 6)
+        min_peaks_uncertain: Minimum peaks for "uncertain" quality (default: 4)
 
     Returns:
         Quality classification: 'good', 'uncertain', 'bad', 'no_annotation'
@@ -391,9 +405,11 @@ def classify_quality(quality_score: float,
     if num_matched == 0:
         return 'no_annotation'
 
-    if quality_score >= threshold_good and num_matched >= min_peaks:
+    # Good: high quality score AND sufficient peaks (GNPS standard: ≥6 peaks)
+    if quality_score >= threshold_good and num_matched >= min_peaks_good:
         return 'good'
-    elif quality_score >= threshold_uncertain:
+    # Uncertain: moderate quality score AND minimum peaks for confidence
+    elif quality_score >= threshold_uncertain and num_matched >= min_peaks_uncertain:
         return 'uncertain'
     else:
         return 'bad'
@@ -449,13 +465,14 @@ def annotate_spectra(spectra_dict: Dict,
             min_explained_intensity=args.min_explained_intensity
         )
 
-        # Classify quality
+        # Classify quality (using tiered peak thresholds)
         quality_class = classify_quality(
             quality_score,
             match_stats['num_matched'],
             threshold_good=args.quality_threshold_good,
             threshold_uncertain=args.quality_threshold_uncertain,
-            min_peaks=args.min_explained_peaks
+            min_peaks_good=args.min_explained_peaks_good,
+            min_peaks_uncertain=args.min_explained_peaks_uncertain
         )
 
         # Create result record

@@ -131,8 +131,8 @@ def plot_quality_score_distribution(df: pd.DataFrame) -> str:
     ax.hist(quality_scores, bins=50, color='#3498db', alpha=0.7, edgecolor='black')
     ax.axvline(quality_scores.mean(), color='red', linestyle='--', linewidth=2, label=f'Mean: {quality_scores.mean():.3f}')
     ax.axvline(quality_scores.median(), color='green', linestyle='--', linewidth=2, label=f'Median: {quality_scores.median():.3f}')
-    ax.axvline(0.7, color='orange', linestyle=':', linewidth=2, label='Good Threshold (0.7)')
-    ax.axvline(0.4, color='purple', linestyle=':', linewidth=2, label='Uncertain Threshold (0.4)')
+    ax.axvline(0.65, color='orange', linestyle=':', linewidth=2, label='Good Threshold (0.65, ~1% FDR)')
+    ax.axvline(0.50, color='purple', linestyle=':', linewidth=2, label='Uncertain Threshold (0.50, ~5% FDR)')
 
     ax.set_xlabel('Quality Score')
     ax.set_ylabel('Number of Spectra')
