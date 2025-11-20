@@ -34,7 +34,9 @@ RUN pip install --no-cache-dir \
     pyteomics>=4.5.0 \
     numpy>=1.23.0 \
     scipy>=1.9.0 \
-    rdkit>=2022.9.1
+    rdkit>=2022.9.1 \
+    datasketch>=1.6.0 \
+    joblib>=1.3.0
 
 # Verify installations
 RUN python -c "import pandas; print('Pandas version:', pandas.__version__)" && \
