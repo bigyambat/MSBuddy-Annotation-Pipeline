@@ -229,7 +229,7 @@ def normalize_spectrum(mz: np.ndarray, intensity: np.ndarray, power: float = 0.5
 
 
 def spectrum_to_minhash(mz: np.ndarray, intensity: np.ndarray,
-                        num_perm: int = 128, mz_bin_size: float = 0.01) -> MinHash:
+                        num_perm: int = 128, mz_bin_size: float = 0.01):
     """
     Convert a spectrum to a MinHash signature for LSH.
 
@@ -268,7 +268,7 @@ def spectrum_to_minhash(mz: np.ndarray, intensity: np.ndarray,
 
 
 def build_lsh_index(normalized_spectra: Dict, num_perm: int = 128,
-                    threshold: float = 0.4) -> Tuple[MinHashLSH, Dict]:
+                    threshold: float = 0.4) -> Tuple:
     """
     Build LSH index for fast candidate pair filtering.
 
@@ -296,7 +296,7 @@ def build_lsh_index(normalized_spectra: Dict, num_perm: int = 128,
     return lsh, minhashes
 
 
-def get_lsh_candidate_pairs(lsh: MinHashLSH, minhashes: Dict,
+def get_lsh_candidate_pairs(lsh, minhashes: Dict,
                             spectrum_ids: List[str]) -> List[Tuple[str, str]]:
     """
     Get candidate pairs from LSH index.
