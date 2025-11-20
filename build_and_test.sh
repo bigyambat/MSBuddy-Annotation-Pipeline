@@ -24,6 +24,8 @@ usage() {
     echo "  -m, --mz-tol <value>     Set m/z tolerance in Da (default: 0.01)"
     echo "  -p, --ppm-tol <value>    Set PPM tolerance (default: 20.0)"
     echo "  -s, --min-sim <value>    Set minimum similarity (default: 0.5)"
+    echo "  --no-lsh                 Disable LSH optimization"
+    echo "  -w, --workers <value>    Set number of parallel workers (default: auto)"
     echo "  -h, --help               Display this help message"
     echo ""
     echo "Examples:"
@@ -41,6 +43,8 @@ CLEAN=false
 MZ_TOL=""
 PPM_TOL=""
 MIN_SIM=""
+USE_LSH=true
+NUM_WORKERS=""
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -66,6 +70,14 @@ while [[ $# -gt 0 ]]; do
             ;;
         -s|--min-sim)
             MIN_SIM="$2"
+            shift 2
+            ;;
+        --no-lsh)
+            USE_LSH=false
+            shift
+            ;;
+        -w|--workers)
+            NUM_WORKERS="$2"
             shift 2
             ;;
         -h|--help)
@@ -166,6 +178,21 @@ if [[ "$TEST" == true ]]; then
         NF_CMD="$NF_CMD --min_similarity $MIN_SIM"
     else
         echo "Using default minimum similarity (0.5)"
+    fi
+
+    if [[ "$USE_LSH" == true ]]; then
+        echo "LSH optimization: enabled (default)"
+        NF_CMD="$NF_CMD --use_lsh true"
+    else
+        echo "LSH optimization: disabled"
+        NF_CMD="$NF_CMD --use_lsh false"
+    fi
+
+    if [[ -n "$NUM_WORKERS" ]]; then
+        echo "Using $NUM_WORKERS parallel workers"
+        NF_CMD="$NF_CMD --num_workers $NUM_WORKERS"
+    else
+        echo "Using auto-detected parallel workers"
     fi
 
     echo ""

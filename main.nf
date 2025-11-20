@@ -140,6 +140,7 @@ process CALCULATE_COSINE_SIMILARITY {
     tuple path(mgf_file), path("${mgf_file.baseName}_with_similarity.tsv"), emit: with_similarity
 
     script:
+    def lsh_flag = params.use_lsh ? '--use_lsh' : ''
     """
     calculate_cosine_similarity.py \\
         --mgf ${mgf_file} \\
@@ -149,7 +150,11 @@ process CALCULATE_COSINE_SIMILARITY {
         --min_peaks ${params.min_peaks} \\
         --top_n ${params.cosine_top_n} \\
         --min_similarity ${params.min_similarity} \\
-        --intensity_power 0.5
+        --intensity_power ${params.intensity_power} \\
+        ${lsh_flag} \\
+        --lsh_threshold ${params.lsh_threshold} \\
+        --lsh_num_perm ${params.lsh_num_perm} \\
+        --num_workers ${params.num_workers}
     """
 }
 

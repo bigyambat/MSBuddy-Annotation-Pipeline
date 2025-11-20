@@ -14,13 +14,31 @@ import numpy as np
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 import sys
+import os
 from collections import defaultdict
+from multiprocessing import Pool, cpu_count
 
 try:
     from pyteomics import mgf
 except ImportError:
     print("Error: pyteomics not installed. Install with: pip install pyteomics", file=sys.stderr)
     sys.exit(1)
+
+# Optional: LSH for fast approximate nearest neighbor filtering
+try:
+    from datasketch import MinHash, MinHashLSH
+    DATASKETCH_AVAILABLE = True
+except ImportError:
+    DATASKETCH_AVAILABLE = False
+    print("Warning: datasketch not installed. LSH optimization disabled.", file=sys.stderr)
+
+# Optional: joblib for parallel processing
+try:
+    from joblib import Parallel, delayed
+    JOBLIB_AVAILABLE = True
+except ImportError:
+    JOBLIB_AVAILABLE = False
+    print("Warning: joblib not installed. Using multiprocessing instead.", file=sys.stderr)
 
 
 def parse_args():
@@ -81,6 +99,36 @@ def parse_args():
         type=float,
         default=0.5,
         help='Power to scale intensities (default: 0.5, use 1.0 for no scaling)'
+    )
+    parser.add_argument(
+        '--use_lsh',
+        action='store_true',
+        default=False,
+        help='Use LSH for fast approximate filtering (recommended for >1000 spectra)'
+    )
+    parser.add_argument(
+        '--lsh_threshold',
+        type=float,
+        default=0.4,
+        help='LSH similarity threshold for candidate filtering (default: 0.4)'
+    )
+    parser.add_argument(
+        '--lsh_num_perm',
+        type=int,
+        default=128,
+        help='Number of permutations for MinHash (default: 128)'
+    )
+    parser.add_argument(
+        '--num_workers',
+        type=int,
+        default=0,
+        help='Number of parallel workers (default: 0 = auto-detect CPU count)'
+    )
+    parser.add_argument(
+        '--chunk_size',
+        type=int,
+        default=1000,
+        help='Chunk size for parallel processing (default: 1000)'
     )
 
     return parser.parse_args()
@@ -180,6 +228,142 @@ def normalize_spectrum(mz: np.ndarray, intensity: np.ndarray, power: float = 0.5
     return mz, normalized_intensity
 
 
+def spectrum_to_minhash(mz: np.ndarray, intensity: np.ndarray,
+                        num_perm: int = 128, mz_bin_size: float = 0.01) -> MinHash:
+    """
+    Convert a spectrum to a MinHash signature for LSH.
+
+    Args:
+        mz: m/z array
+        intensity: Intensity array
+        num_perm: Number of permutations for MinHash
+        mz_bin_size: Bin size for discretizing m/z values
+
+    Returns:
+        MinHash signature
+    """
+    m = MinHash(num_perm=num_perm)
+
+    if len(mz) == 0:
+        return m
+
+    # Weight peaks by intensity (top peaks get more hash entries)
+    max_intensity = np.max(intensity) if len(intensity) > 0 else 1.0
+
+    for i, (mz_val, int_val) in enumerate(zip(mz, intensity)):
+        # Discretize m/z to bin
+        mz_bin = int(mz_val / mz_bin_size)
+
+        # Add hash for this peak
+        m.update(str(mz_bin).encode('utf8'))
+
+        # Add extra hashes for high-intensity peaks (improves accuracy)
+        relative_int = int_val / max_intensity if max_intensity > 0 else 0
+        if relative_int > 0.5:
+            m.update(f"{mz_bin}_high".encode('utf8'))
+        if relative_int > 0.8:
+            m.update(f"{mz_bin}_top".encode('utf8'))
+
+    return m
+
+
+def build_lsh_index(normalized_spectra: Dict, num_perm: int = 128,
+                    threshold: float = 0.4) -> Tuple[MinHashLSH, Dict]:
+    """
+    Build LSH index for fast candidate pair filtering.
+
+    Args:
+        normalized_spectra: Dictionary of normalized spectrum data
+        num_perm: Number of permutations for MinHash
+        threshold: Jaccard similarity threshold for LSH
+
+    Returns:
+        Tuple of (LSH index, spectrum_id -> MinHash mapping)
+    """
+    if not DATASKETCH_AVAILABLE:
+        return None, {}
+
+    print(f"  Building LSH index (threshold={threshold}, num_perm={num_perm})...")
+
+    lsh = MinHashLSH(threshold=threshold, num_perm=num_perm)
+    minhashes = {}
+
+    for spec_id, spec in normalized_spectra.items():
+        mh = spectrum_to_minhash(spec['mz'], spec['intensity'], num_perm=num_perm)
+        minhashes[spec_id] = mh
+        lsh.insert(spec_id, mh)
+
+    return lsh, minhashes
+
+
+def get_lsh_candidate_pairs(lsh: MinHashLSH, minhashes: Dict,
+                            spectrum_ids: List[str]) -> List[Tuple[str, str]]:
+    """
+    Get candidate pairs from LSH index.
+
+    Args:
+        lsh: MinHashLSH index
+        minhashes: Dictionary of MinHash signatures
+        spectrum_ids: List of spectrum IDs
+
+    Returns:
+        List of candidate pairs (spec_id1, spec_id2)
+    """
+    print("  Querying LSH for candidate pairs...")
+
+    candidates = set()
+
+    for spec_id in spectrum_ids:
+        # Query LSH for similar spectra
+        similar = lsh.query(minhashes[spec_id])
+
+        for match_id in similar:
+            if match_id != spec_id:
+                # Store as sorted tuple to avoid duplicates
+                pair = tuple(sorted([spec_id, match_id]))
+                candidates.add(pair)
+
+    candidate_list = list(candidates)
+    total_possible = len(spectrum_ids) * (len(spectrum_ids) - 1) // 2
+    reduction = (1 - len(candidate_list) / total_possible) * 100 if total_possible > 0 else 0
+
+    print(f"  LSH filtered to {len(candidate_list)} candidate pairs ({reduction:.1f}% reduction)")
+
+    return candidate_list
+
+
+def compute_similarity_for_pair(args_tuple):
+    """
+    Compute cosine similarity for a single pair (for parallel processing).
+
+    Args:
+        args_tuple: Tuple of (spec_id1, spec_id2, spec1, spec2, mz_tolerance, min_peaks, min_similarity)
+
+    Returns:
+        Dictionary with similarity result or None
+    """
+    spec_id1, spec_id2, spec1, spec2, mz_tolerance, min_peaks, min_similarity = args_tuple
+
+    cosine_score, num_matches = calculate_cosine_similarity(
+        spec1['mz'], spec1['intensity'],
+        spec2['mz'], spec2['intensity'],
+        mz_tolerance=mz_tolerance,
+        min_peaks=min_peaks
+    )
+
+    if cosine_score >= min_similarity:
+        return {
+            'spectrum_id_1': spec_id1,
+            'spectrum_id_2': spec_id2,
+            'cosine_score': cosine_score,
+            'num_matching_peaks': num_matches,
+            'precursor_mz_1': spec1['precursor_mz'],
+            'precursor_mz_2': spec2['precursor_mz'],
+            'precursor_mz_diff': abs(spec1['precursor_mz'] - spec2['precursor_mz'])
+        }
+    return None
+
+
 def calculate_cosine_similarity(mz1: np.ndarray,
                                 intensity1: np.ndarray,
                                 mz2: np.ndarray,
@@ -239,6 +423,8 @@ def calculate_pairwise_similarities(spectra_dict: Dict,
     """
     Calculate pairwise cosine similarities between all spectra.
 
+    Supports LSH pre-filtering and parallel processing for large datasets.
+
     Args:
         spectra_dict: Dictionary of spectrum data
         args: Command-line arguments
@@ -248,11 +434,13 @@ def calculate_pairwise_similarities(spectra_dict: Dict,
     """
     spectrum_ids = list(spectra_dict.keys())
     n_spectra = len(spectrum_ids)
+    total_comparisons = n_spectra * (n_spectra - 1) // 2
 
     print(f"\nCalculating pairwise similarities for {n_spectra} spectra...")
-    print(f"Total comparisons: {n_spectra * (n_spectra - 1) // 2}")
+    print(f"Total possible comparisons: {total_comparisons}")
 
     # Normalize all spectra first
+    print("  Normalizing spectra...")
     normalized_spectra = {}
     for spec_id, spec in spectra_dict.items():
         mz_norm, intensity_norm = normalize_spectrum(
@@ -266,20 +454,76 @@ def calculate_pairwise_similarities(spectra_dict: Dict,
             'precursor_mz': spec['precursor_mz']
         }
 
-    # Calculate similarities
-    similarities = []
-    comparisons = 0
-    total_comparisons = n_spectra * (n_spectra - 1) // 2
+    # Determine number of workers
+    num_workers = args.num_workers if args.num_workers > 0 else cpu_count()
 
-    for i in range(n_spectra):
-        spec_id1 = spectrum_ids[i]
-        spec1 = normalized_spectra[spec_id1]
+    # Use LSH for large datasets if enabled
+    use_lsh = args.use_lsh and DATASKETCH_AVAILABLE and n_spectra > 100
 
-        for j in range(i + 1, n_spectra):
-            spec_id2 = spectrum_ids[j]
+    if use_lsh:
+        print(f"\nUsing LSH optimization (threshold={args.lsh_threshold})...")
+        lsh, minhashes = build_lsh_index(
+            normalized_spectra,
+            num_perm=args.lsh_num_perm,
+            threshold=args.lsh_threshold
+        )
+        candidate_pairs = get_lsh_candidate_pairs(lsh, minhashes, spectrum_ids)
+    else:
+        # Generate all pairs
+        print("  Generating all pairs (no LSH filtering)...")
+        candidate_pairs = []
+        for i in range(n_spectra):
+            for j in range(i + 1, n_spectra):
+                candidate_pairs.append((spectrum_ids[i], spectrum_ids[j]))
+
+    num_candidates = len(candidate_pairs)
+    print(f"  Processing {num_candidates} candidate pairs...")
+
+    # Decide between parallel and sequential processing
+    use_parallel = num_candidates > 1000 and num_workers > 1
+
+    if use_parallel:
+        print(f"  Using parallel processing with {num_workers} workers...")
+
+        # Prepare arguments for parallel processing
+        pair_args = [
+            (
+                spec_id1, spec_id2,
+                normalized_spectra[spec_id1], normalized_spectra[spec_id2],
+                args.mz_tolerance, args.min_peaks, args.min_similarity
+            )
+            for spec_id1, spec_id2 in candidate_pairs
+        ]
+
+        # Use joblib if available, otherwise multiprocessing
+        if JOBLIB_AVAILABLE:
+            results = Parallel(n_jobs=num_workers, verbose=1)(
+                delayed(compute_similarity_for_pair)(pair_arg)
+                for pair_arg in pair_args
+            )
+        else:
+            # Use multiprocessing Pool
+            with Pool(num_workers) as pool:
+                chunk_size = max(1, len(pair_args) // (num_workers * 10))
+                results = []
+                for i, result in enumerate(pool.imap_unordered(
+                    compute_similarity_for_pair, pair_args, chunksize=chunk_size
+                )):
+                    results.append(result)
+                    if (i + 1) % 10000 == 0:
+                        progress = (i + 1) / num_candidates * 100
+                        print(f"    Progress: {i + 1}/{num_candidates} ({progress:.1f}%)")
+
+        # Filter None results
+        similarities = [r for r in results if r is not None]
+
+    else:
+        # Sequential processing
+        similarities = []
+        for i, (spec_id1, spec_id2) in enumerate(candidate_pairs):
+            spec1 = normalized_spectra[spec_id1]
             spec2 = normalized_spectra[spec_id2]
 
-            # Calculate similarity
             cosine_score, num_matches = calculate_cosine_similarity(
                 spec1['mz'],
                 spec1['intensity'],
@@ -289,7 +533,6 @@ def calculate_pairwise_similarities(spectra_dict: Dict,
                 min_peaks=args.min_peaks
             )
 
-            # Only store if above threshold
             if cosine_score >= args.min_similarity:
                 similarities.append({
                     'spectrum_id_1': spec_id1,
@@ -301,10 +544,9 @@ def calculate_pairwise_similarities(spectra_dict: Dict,
                     'precursor_mz_diff': abs(spec1['precursor_mz'] - spec2['precursor_mz'])
                 })
 
-            comparisons += 1
-            if comparisons % 10000 == 0:
-                progress = comparisons / total_comparisons * 100
-                print(f"  Progress: {comparisons}/{total_comparisons} ({progress:.1f}%)")
+            if (i + 1) % 10000 == 0:
+                progress = (i + 1) / num_candidates * 100
+                print(f"  Progress: {i + 1}/{num_candidates} ({progress:.1f}%)")
 
     print(f"Found {len(similarities)} similar pairs (score >= {args.min_similarity})")
 

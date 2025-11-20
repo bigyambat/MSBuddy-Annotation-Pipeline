@@ -22,6 +22,15 @@ except ImportError:
     print("Error: pyteomics not installed. Install with: pip install pyteomics", file=sys.stderr)
     sys.exit(1)
 
+# RDKit for structure-aware fragmentation
+try:
+    from rdkit import Chem
+    from rdkit.Chem import AllChem, Descriptors, rdMolDescriptors, Fragments
+    RDKIT_AVAILABLE = True
+except ImportError:
+    RDKIT_AVAILABLE = False
+    print("Warning: RDKit not available. Structure-aware fragmentation disabled.", file=sys.stderr)
+
 
 def parse_args():
     """Parse command-line arguments."""
@@ -180,14 +189,316 @@ def load_mgf_spectra(mgf_path: str) -> Dict:
     return spectra_dict
 
 
-def generate_fragment_library(formula: str, precursor_mz: float, charge: int = 1) -> List[Dict]:
+def generate_structure_fragments(smiles: str, precursor_mz: float, charge: int = 1) -> List[Dict]:
     """
-    Generate theoretical fragment library from molecular formula.
+    Generate structure-aware fragments using RDKit functional group analysis.
+
+    Identifies functional groups and generates fragments based on common
+    cleavage patterns for each functional group type.
+
+    Args:
+        smiles: SMILES string of the molecule
+        precursor_mz: Precursor m/z
+        charge: Ion charge state
+
+    Returns:
+        List of theoretical fragments with m/z and description
+    """
+    if not RDKIT_AVAILABLE or not smiles:
+        return []
+
+    try:
+        mol = Chem.MolFromSmiles(smiles)
+        if mol is None:
+            return []
+    except:
+        return []
+
+    fragments = []
+    proton_mass = 1.007276467
+    neutral_mass = Descriptors.ExactMolWt(mol)
+
+    # Define functional group SMARTS patterns and their characteristic losses
+    FUNCTIONAL_GROUP_CLEAVAGES = {
+        # Esters: lose alkoxy group or acyl group
+        'ester': {
+            'smarts': '[CX3](=O)[OX2][#6]',
+            'losses': [
+                ('HCOO', 44.997655),      # Formate loss
+                ('CH3COO', 59.013305),    # Acetate loss
+                ('CO2', 43.989829),       # CO2 from decarboxylation
+                ('OCH3', 31.018175),      # Methoxy loss
+                ('OC2H5', 45.033825),     # Ethoxy loss
+            ]
+        },
+        # Amides: lose NH3, CONH2, or alkyl amide
+        'amide': {
+            'smarts': '[CX3](=O)[NX3]',
+            'losses': [
+                ('NH3', 17.026549),       # Ammonia loss
+                ('CONH2', 44.013663),     # Carboxamide loss
+                ('HCONH2', 45.021464),    # Formamide loss
+                ('CH3CONH2', 59.037114),  # Acetamide loss
+            ]
+        },
+        # Carboxylic acids: lose H2O, CO2, COOH
+        'carboxylic_acid': {
+            'smarts': '[CX3](=O)[OX2H1]',
+            'losses': [
+                ('H2O', 18.010565),       # Water loss
+                ('CO2', 43.989829),       # Decarboxylation
+                ('COOH', 44.997655),      # Carboxyl radical loss
+                ('CO', 27.994915),        # CO loss
+            ]
+        },
+        # Alcohols: lose H2O, or alkyl alcohol
+        'alcohol': {
+            'smarts': '[OX2H][CX4]',
+            'losses': [
+                ('H2O', 18.010565),       # Water loss
+                ('CH3OH', 32.026215),     # Methanol loss
+                ('C2H5OH', 46.041865),    # Ethanol loss
+            ]
+        },
+        # Phenols: lose CO, CHO
+        'phenol': {
+            'smarts': 'c[OX2H]',
+            'losses': [
+                ('CO', 27.994915),        # CO loss from ring
+                ('CHO', 29.002740),       # Formyl loss
+                ('H2O', 18.010565),       # Water loss
+            ]
+        },
+        # Ethers: C-O-C cleavage
+        'ether': {
+            'smarts': '[#6][OX2][#6]',
+            'losses': [
+                ('CH2O', 30.010565),      # Formaldehyde loss
+                ('C2H4O', 44.026215),     # Acetaldehyde loss
+                ('OCH3', 31.018175),      # Methoxy radical
+            ]
+        },
+        # Ketones: lose CO, alkyl groups
+        'ketone': {
+            'smarts': '[#6][CX3](=O)[#6]',
+            'losses': [
+                ('CO', 27.994915),        # CO loss
+                ('CH3CO', 43.018390),     # Acetyl loss
+                ('C2H5CO', 57.034040),    # Propionyl loss
+            ]
+        },
+        # Aldehydes: lose CHO, CO
+        'aldehyde': {
+            'smarts': '[CX3H1](=O)[#6]',
+            'losses': [
+                ('CHO', 29.002740),       # Formyl loss
+                ('CO', 27.994915),        # CO loss
+                ('H2CO', 30.010565),      # Formaldehyde
+            ]
+        },
+        # Primary amines: lose NH3, CH2NH2
+        'primary_amine': {
+            'smarts': '[NX3H2][CX4]',
+            'losses': [
+                ('NH3', 17.026549),       # Ammonia loss
+                ('CH2NH2', 30.034374),    # Methylamine radical
+                ('CH5N', 31.042199),      # Methylamine
+            ]
+        },
+        # Secondary amines
+        'secondary_amine': {
+            'smarts': '[NX3H1]([#6])[#6]',
+            'losses': [
+                ('NH3', 17.026549),       # Ammonia loss (with H transfer)
+                ('CH3NH', 29.026549),     # Methylenimine
+                ('C2H5NH', 43.042199),    # Ethylenimine
+            ]
+        },
+        # Thiols: lose H2S, SH
+        'thiol': {
+            'smarts': '[SX2H][#6]',
+            'losses': [
+                ('H2S', 33.987721),       # Hydrogen sulfide
+                ('SH', 32.979846),        # Thiol radical
+                ('CH3SH', 48.003371),     # Methanethiol
+            ]
+        },
+        # Sulfides/Thioethers
+        'sulfide': {
+            'smarts': '[#6][SX2][#6]',
+            'losses': [
+                ('CH2S', 45.987721),      # Thioformaldehyde
+                ('SCH3', 46.995546),      # Methylthio radical
+            ]
+        },
+        # Nitriles: lose HCN
+        'nitrile': {
+            'smarts': '[CX2]#N',
+            'losses': [
+                ('HCN', 27.010899),       # Hydrogen cyanide
+                ('CN', 26.003074),        # Cyano radical
+            ]
+        },
+        # Nitro groups: lose NO2, NO
+        'nitro': {
+            'smarts': '[NX3](=O)=O',
+            'losses': [
+                ('NO2', 45.992904),       # Nitrogen dioxide
+                ('NO', 29.997989),        # Nitric oxide
+                ('HNO2', 46.005479),      # Nitrous acid
+            ]
+        },
+        # Phosphate esters
+        'phosphate': {
+            'smarts': '[PX4](=O)([OX2])([OX2])[OX2]',
+            'losses': [
+                ('H3PO4', 97.976896),     # Phosphoric acid
+                ('HPO3', 79.966331),      # Metaphosphoric acid
+                ('H2PO4', 96.969021),     # Dihydrogen phosphate
+            ]
+        },
+        # Sulfates
+        'sulfate': {
+            'smarts': '[SX4](=O)(=O)([OX2])[OX2]',
+            'losses': [
+                ('SO3', 79.956815),       # Sulfur trioxide
+                ('H2SO4', 97.967379),     # Sulfuric acid
+                ('HSO3', 80.964640),      # Bisulfite
+            ]
+        },
+        # Glycosidic bonds (sugars)
+        'glycoside': {
+            'smarts': '[OX2]([#6])[CX4]1[OX2][CX4][CX4][CX4][CX4]1',
+            'losses': [
+                ('C6H10O5', 162.052824),  # Hexose (glucose/galactose)
+                ('C5H8O4', 132.042259),   # Pentose (xylose/arabinose)
+                ('C6H10O4', 146.057909),  # Deoxyhexose (fucose/rhamnose)
+            ]
+        },
+        # Aromatic rings - characteristic fragments
+        'benzene': {
+            'smarts': 'c1ccccc1',
+            'losses': [
+                ('C2H2', 26.015650),      # Acetylene (retro-Diels-Alder)
+                ('C4H2', 50.015650),      # Diacetylene
+                ('CO', 27.994915),        # CO from substituted rings
+            ]
+        },
+        # Halides
+        'chloride': {
+            'smarts': '[Cl][#6]',
+            'losses': [
+                ('HCl', 35.976678),       # Hydrogen chloride
+                ('Cl', 34.968853),        # Chlorine radical
+            ]
+        },
+        'bromide': {
+            'smarts': '[Br][#6]',
+            'losses': [
+                ('HBr', 79.926160),       # Hydrogen bromide
+                ('Br', 78.918336),        # Bromine radical
+            ]
+        },
+        'fluoride': {
+            'smarts': '[F][#6]',
+            'losses': [
+                ('HF', 20.006229),        # Hydrogen fluoride
+                ('F', 18.998403),         # Fluorine radical
+            ]
+        },
+    }
+
+    # Find functional groups present in the molecule
+    found_groups = []
+    for group_name, group_info in FUNCTIONAL_GROUP_CLEAVAGES.items():
+        pattern = Chem.MolFromSmarts(group_info['smarts'])
+        if pattern and mol.HasSubstructMatch(pattern):
+            matches = mol.GetSubstructMatches(pattern)
+            found_groups.append((group_name, len(matches), group_info['losses']))
+
+    # Generate fragments for each functional group
+    seen_mz = set()  # Avoid duplicate m/z values
+
+    for group_name, count, losses in found_groups:
+        for loss_name, loss_mass in losses:
+            fragment_mass = neutral_mass - loss_mass
+
+            if fragment_mass < 50:  # Skip very small fragments
+                continue
+
+            # Calculate m/z based on charge
+            if charge > 0:
+                fragment_mz = (fragment_mass + charge * proton_mass) / abs(charge)
+            else:
+                fragment_mz = (fragment_mass - abs(charge) * proton_mass) / abs(charge)
+
+            if fragment_mz <= 0:
+                continue
+
+            # Round to avoid floating point duplicates
+            mz_key = round(fragment_mz, 4)
+            if mz_key in seen_mz:
+                continue
+            seen_mz.add(mz_key)
+
+            # Intensity scaling: more common groups get higher intensity
+            relative_intensity = min(70.0, 30.0 + count * 10)
+
+            fragments.append({
+                'mz': fragment_mz,
+                'formula': f'-{loss_name}',
+                'loss': f'{group_name}:{loss_name}',
+                'relative_intensity': relative_intensity
+            })
+
+    # Add ring-specific fragments for cyclic structures
+    ring_info = mol.GetRingInfo()
+    num_rings = ring_info.NumRings()
+
+    if num_rings > 0:
+        # Common ring cleavage patterns
+        ring_losses = [
+            ('C3H4', 40.031300),   # Cyclopropene equivalent
+            ('C4H6', 54.046950),   # Butadiene (from ring opening)
+            ('C5H6', 66.046950),   # Cyclopentadiene
+            ('C6H6', 78.046950),   # Benzene
+        ]
+
+        for loss_name, loss_mass in ring_losses:
+            fragment_mass = neutral_mass - loss_mass
+            if fragment_mass < 50:
+                continue
+
+            if charge > 0:
+                fragment_mz = (fragment_mass + charge * proton_mass) / abs(charge)
+            else:
+                fragment_mz = (fragment_mass - abs(charge) * proton_mass) / abs(charge)
+
+            mz_key = round(fragment_mz, 4)
+            if mz_key in seen_mz:
+                continue
+            seen_mz.add(mz_key)
+
+            fragments.append({
+                'mz': fragment_mz,
+                'formula': f'-{loss_name}',
+                'loss': f'ring:{loss_name}',
+                'relative_intensity': 25.0
+            })
+
+    return fragments
+
+
+def generate_fragment_library(formula: str, precursor_mz: float, charge: int = 1,
+                              smiles: str = None) -> List[Dict]:
+    """
+    Generate theoretical fragment library from molecular formula and optionally SMILES.
 
     Args:
         formula: Molecular formula string
         precursor_mz: Precursor m/z
         charge: Ion charge state
+        smiles: Optional SMILES string for structure-aware fragmentation
 
     Returns:
         List of theoretical fragments with m/z and description
@@ -272,6 +583,21 @@ def generate_fragment_library(formula: str, precursor_mz: float, charge: int = 1
                             })
                 except:
                     continue
+
+    # Add structure-aware fragments if SMILES is provided
+    if smiles:
+        structure_fragments = generate_structure_fragments(smiles, precursor_mz, charge)
+        if structure_fragments:
+            # Track existing m/z values to avoid duplicates
+            existing_mz = {round(f['mz'], 4) for f in fragments}
+
+            for frag in structure_fragments:
+                mz_key = round(frag['mz'], 4)
+                if mz_key not in existing_mz:
+                    fragments.append(frag)
+                    existing_mz.add(mz_key)
+
+            print(f"  Added {len(structure_fragments)} structure-aware fragments from functional group analysis")
 
     return fragments
 
@@ -442,11 +768,13 @@ def annotate_spectra(spectra_dict: Dict,
 
         spectrum = spectra_dict[spec_id]
 
-        # Generate theoretical fragments
+        # Generate theoretical fragments (with structure-aware fragmentation if SMILES available)
+        smiles = ref_row.get('smiles', '') if not pd.isna(ref_row.get('smiles', '')) else ''
         theoretical_fragments = generate_fragment_library(
             ref_row['formula'],
             ref_row['precursor_mz'],
-            ref_row['charge']
+            ref_row['charge'],
+            smiles=smiles
         )
 
         # Match peaks to fragments
